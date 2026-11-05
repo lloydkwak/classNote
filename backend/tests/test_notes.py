@@ -220,10 +220,10 @@ def test_notes_get_their_prefix_and_keep_their_quote():
 def test_a_marker_in_different_case_is_not_doubled():
     quote = "이 base case가 시험에 나옵니다"
     reply = json.dumps(
-        [{**GOOD, "type": "exam_hint", "note": "★ Exam: n ≈ 100,000", "quote": quote, "language": "en"}]
+        [{**GOOD, "type": "exam_hint", "note": "★ Exam: base case 출제", "quote": quote, "language": "en"}]
     )
     note = generate_span_notes(EXAM_SPAN, PAGE, ScriptedProvider(reply))[0]
-    assert note.note == "★ exam: n ≈ 100,000"
+    assert note.note == "★ exam: base case 출제"
 
 
 def test_an_exam_hint_without_exam_words_in_its_quote_loses_the_claim():
