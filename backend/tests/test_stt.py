@@ -22,7 +22,7 @@ class CountingProvider(stt.STTProvider):
 @pytest.fixture
 def provider(monkeypatch):
     counting = CountingProvider()
-    monkeypatch.setattr(stt, "get_stt_provider", lambda: counting)
+    monkeypatch.setattr(stt, "get_stt_provider", lambda model=None: counting)
     return counting
 
 
@@ -101,6 +101,60 @@ def test_faster_whisper_language_override(monkeypatch, tmp_path):
     stt.FasterWhisperProvider("small", "cpu", "int8").transcribe(tmp_path / "a.mp3", "", "ko")
     assert captured["language"] == "ko"
     assert captured["multilingual"] is False
+
+
+def test_a_job_can_choose_its_own_model(monkeypatch):
+    monkeypatch.setenv("STT_PROVIDER", "faster-whisper")
+    monkeypatch.setenv("STT_MODEL", "small")
+    assert stt.get_stt_provider().model == "small"
+    assert stt.get_stt_provider("base").model == "base"
+
+
+def test_live_mode_decodes_small_models_greedily_but_not_turbo(monkeypatch, tmp_path):
+    monkeypatch.setenv("STT_PROVIDER", "faster-whisper")
+    monkeypatch.setenv("STT_MODEL", "large-v3-turbo")
+    monkeypatch.delenv("LIVE_STT_MODEL", raising=False)
+    captured = fake_faster_whisper(monkeypatch)
+
+    fast = stt.get_stt_provider(live=True)
+    assert fast.model == "small"
+    fast.transcribe(tmp_path / "a.mp3", "terms", None)
+    assert (captured["beam_size"], captured["temperature"]) == (1, 0.0)
+    assert captured["initial_prompt"] == "terms"
+
+    captured.clear()
+    stt.get_stt_provider("large-v3-turbo", live=True).transcribe(tmp_path / "a.mp3", "terms", None)
+    assert "beam_size" not in captured
+
+    captured.clear()
+    upload = stt.get_stt_provider()
+    assert upload.model == "large-v3-turbo"
+    upload.transcribe(tmp_path / "a.mp3", "terms", None)
+    assert "beam_size" not in captured
+
+
+def test_prepare_runs_the_model_once_to_warm_it_up(monkeypatch):
+    captured = fake_faster_whisper(monkeypatch)
+    stt.FasterWhisperProvider("small", "cpu", "int8").prepare()
+    assert captured["vad_filter"] is True
+
+
+def test_the_model_stays_loaded_between_calls(monkeypatch, tmp_path):
+    loads = []
+
+    class FakeWhisperModel:
+        def __init__(self, *args, **kwargs):
+            loads.append(args)
+
+        def transcribe(self, audio, **options):
+            return iter([]), None
+
+    monkeypatch.setattr("faster_whisper.WhisperModel", FakeWhisperModel)
+    provider = stt.FasterWhisperProvider("small", "cpu", "int8")
+    provider.prepare()
+    provider.transcribe(tmp_path / "a.mp3", "", None)
+    provider.transcribe(tmp_path / "b.mp3", "", None)
+    assert len(loads) == 1
 
 
 def test_openai_splits_large_files_and_corrects_timestamps(monkeypatch, tmp_path):

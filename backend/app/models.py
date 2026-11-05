@@ -130,6 +130,18 @@ class Annotations(BaseModel):
 
 class JobStatus(BaseModel):
     status: Literal[
-        "queued", "extracting_pdf", "transcribing", "aligning", "writing_notes", "done", "error"
+        "queued",
+        "extracting_pdf",
+        "transcribing",
+        "aligning",
+        "writing_notes",
+        "preparing",  # A live job reading its slides and loading its models.
+        "ready",  # A live job waiting for the talk to start.
+        "recording",  # A live job receiving and processing chunks.
+        "done",
+        "error",
     ]
     error: str | None = None
+    chunks_received: int = 0
+    chunks_processed: int = 0
+    note_count: int = 0

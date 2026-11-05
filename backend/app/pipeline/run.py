@@ -21,6 +21,7 @@ from app.pipeline.pdf_extract import extract_pdf
 from app.pipeline.stt import transcribe
 from app.pipeline.windowing import build_windows
 
+JOB_OPTIONS_NAME = "job.json"
 PDF_NAME = "input.pdf"
 AUDIO_SOURCE_PREFIX = "audio_source"
 AUDIO_NAME = "audio.mp3"
@@ -37,7 +38,9 @@ def job_dir(job_id: str) -> Path:
     return get_settings().data_dir / "jobs" / job_id
 
 
-def create_job(pdf: Path, audio: Path | None, job_id: str | None = None) -> str:
+def create_job(
+    pdf: Path, audio: Path | None, job_id: str | None = None, stt_model: str | None = None
+) -> str:
     """Copy the inputs into a new job folder and return its id."""
     job_id = job_id or uuid.uuid4().hex[:12]
     folder = job_dir(job_id)
@@ -45,7 +48,13 @@ def create_job(pdf: Path, audio: Path | None, job_id: str | None = None) -> str:
     shutil.copyfile(pdf, folder / PDF_NAME)
     if audio is not None:
         shutil.copyfile(audio, folder / f"{AUDIO_SOURCE_PREFIX}{audio.suffix.lower()}")
+    (folder / JOB_OPTIONS_NAME).write_text(json.dumps({"stt_model": stt_model}), encoding="utf-8")
     return job_id
+
+
+def _job_stt_model(folder: Path) -> str | None:
+    path = folder / JOB_OPTIONS_NAME
+    return json.loads(path.read_text(encoding="utf-8"))["stt_model"] if path.exists() else None
 
 
 def _write_models(path: Path, models: list) -> None:
@@ -81,7 +90,7 @@ def _step_caption(folder: Path) -> None:
 def _step_transcribe(folder: Path) -> None:
     sources = sorted(folder.glob(f"{AUDIO_SOURCE_PREFIX}.*"))
     audio = convert_to_mp3(sources[0], folder / AUDIO_NAME) if sources else None
-    segments = transcribe(audio, _read_extraction(folder).key_terms)
+    segments = transcribe(audio, _read_extraction(folder).key_terms, _job_stt_model(folder))
     _write_models(folder / SEGMENTS_NAME, segments)
 
 
@@ -100,7 +109,11 @@ def _read_alignment(folder: Path) -> Alignment:
 
 
 def _step_notes(folder: Path) -> None:
-    notes, complete = generate_notes(_read_alignment(folder), _read_extraction(folder))
+    notes, complete = generate_notes(
+        _read_alignment(folder),
+        _read_extraction(folder),
+        _read_list(folder / SEGMENTS_NAME, Segment),
+    )
     _write_models(folder / NOTES_NAME, notes)
     (folder / NOTES_COMPLETE_NAME).write_text(json.dumps(complete), encoding="utf-8")
 
@@ -150,6 +163,15 @@ def run_pipeline(
     for name, status, function in STEPS[start : stop + 1]:
         on_status(status)
         function(folder)
+
+
+def read_annotations(job_id: str) -> Annotations:
+    path = job_dir(job_id) / ANNOTATIONS_NAME
+    return Annotations.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def export_job(job_id: str) -> None:
+    _step_export(job_dir(job_id))
 
 
 def read_alignment(job_id: str) -> Alignment:

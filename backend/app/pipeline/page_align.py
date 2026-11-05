@@ -3,7 +3,9 @@
 import hashlib
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
 import numpy as np
 
@@ -13,7 +15,7 @@ from app.models import AlignedWindow, Alignment, Page, PdfExtraction, Window
 # A z-score gap this large between the best and second-best page is full confidence.
 FULL_CONFIDENCE_GAP = 1.0
 # Stops a near-constant best similarity from making tiny differences look like outliers.
-MIN_BEST_SCORE_SCALE = 0.005
+MIN_BEST_SCORE_SCALE = 0.01
 MAD_TO_STD = 1.4826
 MIN_WINDOWS_FOR_PAGE_BIAS = 10
 
@@ -99,13 +101,20 @@ def off_topic_mask(similarities: np.ndarray, config: AlignConfig) -> np.ndarray:
     return flat | ((best - median) / scale < config.off_topic_threshold)
 
 
-def viterbi(scores_by_window: np.ndarray, config: AlignConfig) -> list[int]:
-    """Return the page index per row that maximizes score minus move penalties."""
+def viterbi(
+    scores_by_window: np.ndarray, config: AlignConfig, start_index: int | None = None
+) -> list[int]:
+    """Return the page index per row that maximizes score minus move penalties.
+
+    With `start_index`, moving to the first row's page costs what a move from there would.
+    """
     window_count, page_count = scores_by_window.shape
     if window_count == 0:
         return []
     penalties = transition_penalties(page_count, config)
     scores = scores_by_window[0].copy()
+    if start_index is not None:
+        scores -= penalties[start_index]
     previous = np.zeros((window_count, page_count), dtype=int)
     for row in range(1, window_count):
         candidates = scores[:, None] - penalties
@@ -133,18 +142,25 @@ class WindowDecision:
     confidence: float
 
 
-def align_similarities(similarities: np.ndarray, config: AlignConfig) -> list[WindowDecision]:
+def align_similarities(
+    similarities: np.ndarray, config: AlignConfig, frozen: Sequence[int | None] = ()
+) -> list[WindowDecision]:
     """Align a windows x pages matrix.
 
     Off-topic windows are left out of the DP, so chatter neither moves the current
     page nor costs anything: the next on-topic window continues from where it left off.
+
+    `frozen` holds decisions already made for the first windows. They stay as they are,
+    and the rest continue from the last page among them.
     """
     if similarities.shape[0] == 0 or similarities.shape[1] == 0:
         return [WindowDecision(None, 0, 0.0) for _ in range(similarities.shape[0])]
     normalized = normalize_rows(remove_page_bias(similarities))
     on_topic = np.flatnonzero(~off_topic_mask(similarities, config))
-    path = viterbi(normalized[on_topic], config)
-    chosen = dict(zip(on_topic.tolist(), path))
+    on_topic = on_topic[on_topic >= len(frozen)]
+    start_index = next((page for page in reversed(frozen) if page is not None), None)
+    path = viterbi(normalized[on_topic], config, start_index)
+    chosen = dict(enumerate(frozen)) | dict(zip(on_topic.tolist(), path))
     decisions = []
     for index, row in enumerate(normalized):
         page_index = chosen.get(index)
@@ -155,15 +171,24 @@ def align_similarities(similarities: np.ndarray, config: AlignConfig) -> list[Wi
 
 
 class E5Embedder:
-    """Local multilingual embeddings. e5 models need the query/passage prefixes."""
+    """Local multilingual embeddings. e5 models need the query/passage prefixes.
+
+    Results are remembered, because a live talk embeds the same pages and windows
+    again after every chunk.
+    """
 
     def __init__(self, model: str) -> None:
         from sentence_transformers import SentenceTransformer  # Slow import.
 
         self._model = SentenceTransformer(model, device="cpu")
+        self._remembered: dict[str, np.ndarray] = {}
 
     def _encode(self, texts: list[str]) -> np.ndarray:
-        return np.asarray(self._model.encode(texts, normalize_embeddings=True, batch_size=16))
+        new = [text for text in dict.fromkeys(texts) if text not in self._remembered]
+        if new:
+            vectors = self._model.encode(new, normalize_embeddings=True, batch_size=16)
+            self._remembered.update(zip(new, np.asarray(vectors)))
+        return np.array([self._remembered[text] for text in texts])
 
     def embed_queries(self, texts: list[str]) -> np.ndarray:
         return self._encode([f"query: {text}" for text in texts])
@@ -196,10 +221,15 @@ class MockEmbedder:
         return np.array([self._embed(text) for text in texts])
 
 
+@lru_cache(maxsize=1)
+def _load_e5(model: str) -> E5Embedder:
+    return E5Embedder(model)
+
+
 def get_embedder():
     settings = get_settings()
     if settings.embedding_provider == "e5":
-        return E5Embedder(settings.embedding_model)
+        return _load_e5(settings.embedding_model)
     if settings.embedding_provider == "mock":
         return MockEmbedder()
     raise ValueError(f"Unknown EMBEDDING_PROVIDER: {settings.embedding_provider!r}")
@@ -226,13 +256,15 @@ def align_windows(
     extraction: PdfExtraction,
     embedder=None,
     config: AlignConfig | None = None,
+    frozen_pages: Sequence[int | None] = (),
 ) -> Alignment:
     embedder = embedder or get_embedder()
     config = config or AlignConfig.from_env()
     pages = extraction.pages
     similarities = similarity_matrix(windows, pages, embedder)
-    decisions = align_similarities(similarities, config)
     numbers = [page.page for page in pages]
+    frozen = [None if page is None else numbers.index(page) for page in frozen_pages]
+    decisions = align_similarities(similarities, config, frozen)
     aligned = [
         AlignedWindow(
             **window.model_dump(),

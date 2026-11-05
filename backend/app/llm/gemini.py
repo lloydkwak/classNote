@@ -11,7 +11,6 @@ log = logging.getLogger(__name__)
 # The free tier allows only about 20 requests per day, per model, so a lecture can use up
 # several models. Newer models were also often overloaded (503) when this list was chosen.
 DEFAULT_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
-REQUEST_TIMEOUT_MS = 120_000
 
 
 class GeminiProvider(LLMProvider):
@@ -24,19 +23,21 @@ class GeminiProvider(LLMProvider):
         self._models = [model] if model else list(DEFAULT_MODELS)
         # The cache key, which stays the same when a call falls back to another model.
         self.model = self._models[0]
-        self._client = genai.Client(
-            api_key=api_key, http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS)
-        )
+        self._client = genai.Client(api_key=api_key)
 
     def _generate(self, contents: list) -> str:
-        config = types.GenerateContentConfig(response_mime_type="application/json")
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            http_options=types.HttpOptions(timeout=int(self.retry_policy.request_timeout * 1000)),
+        )
         while True:
             model = self._models[0]
             try:
                 response = with_backoff(
                     lambda: self._client.models.generate_content(
                         model=model, contents=contents, config=config
-                    )
+                    ),
+                    policy=self.retry_policy,
                 )
                 return response.text or ""
             except QuotaExhausted:

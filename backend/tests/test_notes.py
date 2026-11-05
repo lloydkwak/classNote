@@ -4,13 +4,23 @@ import re
 import pytest
 
 from app.llm.base import LLMProvider, QuotaExhausted
-from app.models import AlignedWindow, Alignment, Annotations, Block, Note, Page, PdfExtraction
+from app.models import (
+    AlignedWindow,
+    Alignment,
+    Annotations,
+    Block,
+    Note,
+    Page,
+    PdfExtraction,
+    Segment,
+)
 from app.pipeline import block_align
 from app.pipeline import run as pipeline
 from app.pipeline.block_align import (
     build_spans,
     find_emphasis,
     generate_span_notes,
+    locate_quote,
     quote_in_transcript,
 )
 from app.pipeline.consolidate import consolidate, merge_duplicates
@@ -105,6 +115,65 @@ def test_note_gets_the_span_times_and_is_cached():
     assert first == second
     assert (first[0].start, first[0].end, first[0].page) == (10, 40, 3)
     assert provider.calls == 1
+
+
+def segs(*rows):
+    return [Segment(start=start, end=end, text=text) for start, end, text in rows]
+
+
+TIMED = segs(
+    (10, 20, "이 recursion이 base case에서"),
+    (20, 30, "멈춥니다. 그 다음에는"),
+    (30, 40, "merge sort로 넘어갑니다."),
+)
+
+
+def test_quote_in_one_segment_gets_that_segments_times():
+    assert locate_quote("merge sort로 넘어갑니다", TIMED) == (30, 40)
+
+
+def test_quote_crossing_segments_runs_from_the_first_to_the_last():
+    assert locate_quote("base case에서 멈춥니다", TIMED) == (10, 30)
+    assert locate_quote("recursion이 base case에서 멈춥니다. 그 다음에는 merge", TIMED) == (10, 40)
+
+
+def test_locating_ignores_spacing_punctuation_and_case():
+    assert locate_quote("BASE CASE 에서, 멈춥니다!", TIMED) == (10, 30)
+
+
+def test_quote_that_is_not_in_the_segments_is_not_located():
+    assert locate_quote("deadlock", TIMED) is None
+    assert locate_quote("...", TIMED) is None
+    assert locate_quote("anything", []) is None
+
+
+def test_quote_ending_exactly_at_a_segment_boundary_stops_there():
+    assert locate_quote("이 recursion이 base case에서", TIMED) == (10, 20)
+    assert locate_quote("멈춥니다", TIMED) == (20, 30)
+
+
+def test_notes_on_one_page_get_different_times_from_their_quotes():
+    span = Span(page=3, start=10, end=40, transcript=" ".join(s.text for s in TIMED))
+    first = {**GOOD, "quote": "base case에서"}
+    second = {**GOOD, "note": "다른 설명", "quote": "merge sort로 넘어갑니다"}
+    notes = generate_span_notes(span, PAGE, ScriptedProvider(json.dumps([first, second])), TIMED)
+    assert [(note.start, note.end) for note in notes] == [(10, 20), (30, 40)]
+
+
+def test_note_falls_back_to_the_span_when_its_quote_cannot_be_located():
+    span = Span(page=3, start=10, end=40, transcript="base case에서 멈춥니다")
+    other = segs((10, 40, "전혀 다른 문장입니다"))
+    notes = generate_span_notes(span, PAGE, ScriptedProvider(json.dumps([GOOD])), other)
+    assert (notes[0].start, notes[0].end) == (10, 40)
+
+
+def test_segments_outside_the_span_are_not_used():
+    span = Span(page=3, start=100, end=130, transcript="base case에서 멈춥니다")
+    earlier_and_inside = segs((10, 20, "base case에서 멈춥니다"), (100, 130, "base case에서 멈춥니다"))
+    notes = generate_span_notes(
+        span, PAGE, ScriptedProvider(json.dumps([GOOD])), earlier_and_inside
+    )
+    assert (notes[0].start, notes[0].end) == (100, 130)
 
 
 def test_invented_quote_is_dropped():

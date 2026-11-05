@@ -14,18 +14,25 @@ class OpenAIProvider(LLMProvider):
         self.model = model or DEFAULT_MODEL
         self._client = OpenAI()
 
+    def _limited_client(self) -> OpenAI:
+        """with_backoff does the retrying, so the SDK's own retries would only add delay."""
+        return self._client.with_options(
+            timeout=self.retry_policy.request_timeout, max_retries=0
+        )
+
     def complete_json(self, prompt: str) -> str:
         # JSON mode only allows an object at the top level, so ask for a wrapper
         # and let the caller accept either shape.
         response = with_backoff(
-            lambda: self._client.chat.completions.create(
+            lambda: self._limited_client().chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": 'Reply with JSON: {"items": [...]}.'},
                     {"role": "user", "content": prompt},
                 ],
                 response_format={"type": "json_object"},
-            )
+            ),
+            policy=self.retry_policy,
         )
         return response.choices[0].message.content or ""
 
@@ -38,8 +45,9 @@ class OpenAIProvider(LLMProvider):
             for image in images
         ]
         response = with_backoff(
-            lambda: self._client.chat.completions.create(
+            lambda: self._limited_client().chat.completions.create(
                 model=self.model, messages=[{"role": "user", "content": content}]
-            )
+            ),
+            policy=self.retry_policy,
         )
         return response.choices[0].message.content or ""

@@ -15,7 +15,7 @@ import pymupdf
 from app.cache import read_cache, write_cache
 from app.config import get_settings
 from app.llm import get_provider
-from app.llm.base import LLMProvider, QuotaExhausted
+from app.llm.base import DEFAULT_RETRY, LLMProvider, QuotaExhausted, RetryPolicy
 from app.models import Block, PdfExtraction
 
 log = logging.getLogger(__name__)
@@ -87,7 +87,9 @@ def _ask_for_captions(provider: LLMProvider, batch: list[_Figure]) -> list[str]:
     raise ValueError("The LLM returned invalid captions twice.")
 
 
-def caption_figures(pdf: Path, extraction: PdfExtraction) -> None:
+def caption_figures(
+    pdf: Path, extraction: PdfExtraction, retry: RetryPolicy = DEFAULT_RETRY
+) -> None:
     """Fill in each figure block's text, using cached captions where possible."""
     figures = _render_figures(pdf, extraction)
     pending = []
@@ -109,6 +111,7 @@ def caption_figures(pdf: Path, extraction: PdfExtraction) -> None:
         log.warning("Skipping figure captions: %s", error)
         return
 
+    provider.retry_policy = retry
     failures = 0
     for start in range(0, len(pending), BATCH_SIZE):
         batch = pending[start : start + BATCH_SIZE]

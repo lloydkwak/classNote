@@ -4,6 +4,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TypeVar
 
 import httpx
@@ -14,9 +15,20 @@ T = TypeVar("T")
 
 RETRYABLE_STATUS_CODES = {429, 503}
 MAX_RETRIES = 8
-INITIAL_BACKOFF_SECONDS = 5.0
-MAX_BACKOFF_SECONDS = 120.0
 RETRY_DELAY = re.compile(r"^(\d+(?:\.\d+)?)s$")
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    max_retries: int = MAX_RETRIES
+    initial_backoff: float = 5.0
+    max_backoff: float = 120.0  # A longer server-requested wait means giving up.
+    request_timeout: float = 120.0
+
+
+DEFAULT_RETRY = RetryPolicy()
+# During a live talk, a slow span isn't worth waiting for: skip it instead.
+LIVE_RETRY = RetryPolicy(max_retries=1, initial_backoff=1.0, max_backoff=5.0, request_timeout=25.0)
 
 
 class QuotaExhausted(RuntimeError):
@@ -28,6 +40,7 @@ class LLMProvider(ABC):
 
     name: str
     model: str
+    retry_policy: RetryPolicy = DEFAULT_RETRY
 
     @abstractmethod
     def complete_json(self, prompt: str) -> str:
@@ -60,19 +73,20 @@ def suggested_delay(error: Exception) -> float | None:
 def with_backoff(
     call: Callable[[], T],
     sleep: Callable[[float], None] = time.sleep,
+    policy: RetryPolicy = DEFAULT_RETRY,
 ) -> T:
     """Run `call`, waiting and retrying on network, 429, and 503 errors. Other errors propagate."""
-    delay = INITIAL_BACKOFF_SECONDS
-    for attempt in range(MAX_RETRIES + 1):
+    delay = policy.initial_backoff
+    for attempt in range(policy.max_retries + 1):
         try:
             return call()
         except Exception as error:
-            if not is_retryable_error(error) or attempt == MAX_RETRIES:
+            if not is_retryable_error(error) or attempt == policy.max_retries:
                 raise
             suggested = suggested_delay(error)
-            if suggested is not None and suggested > MAX_BACKOFF_SECONDS:
+            if suggested is not None and suggested > policy.max_backoff:
                 raise QuotaExhausted(f"Quota reached; retry in {suggested:.0f}s.") from error
-            wait = max(suggested or 0, min(delay, MAX_BACKOFF_SECONDS)) + random.uniform(0, 1)
+            wait = max(suggested or 0, min(delay, policy.max_backoff)) + random.uniform(0, 1)
             log.warning("LLM call failed temporarily; retrying in %.0fs", wait)
             sleep(wait)
             delay *= 2
