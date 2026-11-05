@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TypeVar
 
+import httpx
+
 log = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -27,7 +29,9 @@ class LLMProvider(ABC):
 
 
 def is_retryable_error(error: Exception) -> bool:
-    """Recognize rate limiting or overload from any SDK, which name the status differently."""
+    """Recognize network failures, and rate limiting or overload from any SDK."""
+    if isinstance(error, httpx.TransportError):  # All three provider SDKs use httpx.
+        return True
     status = getattr(error, "status_code", None) or getattr(error, "code", None)
     return status in RETRYABLE_STATUS_CODES
 
@@ -36,7 +40,7 @@ def with_backoff(
     call: Callable[[], T],
     sleep: Callable[[float], None] = time.sleep,
 ) -> T:
-    """Run `call`, waiting and retrying on 429 and 503 errors. Other errors propagate."""
+    """Run `call`, waiting and retrying on network, 429, and 503 errors. Other errors propagate."""
     delay = INITIAL_BACKOFF_SECONDS
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -45,7 +49,7 @@ def with_backoff(
             if not is_retryable_error(error) or attempt == MAX_RETRIES:
                 raise
             wait = min(delay, MAX_BACKOFF_SECONDS) + random.uniform(0, 1)
-            log.warning("LLM rate limited or overloaded; retrying in %.0fs", wait)
+            log.warning("LLM call failed temporarily; retrying in %.0fs", wait)
             sleep(wait)
             delay *= 2
     raise AssertionError("unreachable")

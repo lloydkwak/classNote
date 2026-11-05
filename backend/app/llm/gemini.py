@@ -5,7 +5,9 @@ from google.genai import types
 
 from app.llm.base import LLMProvider, with_backoff
 
-DEFAULT_MODEL = "gemini-3.8-flash"
+# Newer models were often overloaded (503) on the free tier when this was chosen.
+DEFAULT_MODEL = "gemini-3.6-flash"
+REQUEST_TIMEOUT_MS = 120_000
 
 
 class GeminiProvider(LLMProvider):
@@ -16,7 +18,9 @@ class GeminiProvider(LLMProvider):
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is not set. Add it to .env.")
         self.model = model or DEFAULT_MODEL
-        self._client = genai.Client(api_key=api_key)
+        self._client = genai.Client(
+            api_key=api_key, http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS)
+        )
 
     def complete_json(self, prompt: str) -> str:
         response = with_backoff(

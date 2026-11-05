@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 from app.llm.base import MAX_RETRIES, with_backoff
@@ -38,6 +39,18 @@ def test_retries_on_503():
         calls.append(1)
         if len(calls) < 2:
             raise Overloaded()
+        return "ok"
+
+    assert with_backoff(call, sleep=lambda _: None) == "ok"
+
+
+def test_retries_on_network_failure():
+    calls = []
+
+    def call():
+        calls.append(1)
+        if len(calls) < 2:
+            raise httpx.ConnectError("getaddrinfo failed")
         return "ok"
 
     assert with_backoff(call, sleep=lambda _: None) == "ok"

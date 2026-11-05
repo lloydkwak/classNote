@@ -41,7 +41,9 @@ Rules:
 - Write each note in the language the professor used in that part of the lecture. For mixed
   speech, follow the dominant language.
 - Never translate technical terms. Keep domain terms, names, and jargon exactly as the professor
-  said them or as they appear on the slide, including inside a note in another language.
+  said them or as they appear on the slide, including inside a note in another language. If the
+  transcript spells a term phonetically or mishears it, use the slide's spelling. For example,
+  write "recursion" and "base case" inside a Korean note, not a Korean translation of them.
 - Do not invent anything. Every note must be supported by its quote.
 - "exam_hint_candidates" lists emphasis words found in the transcript. Use type "exam_hint" when
   the professor really is saying that something will be tested, and otherwise ignore them.
