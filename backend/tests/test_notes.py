@@ -21,6 +21,8 @@ from app.pipeline.block_align import (
     build_spans,
     find_emphasis,
     generate_span_notes,
+    checked_note_type,
+    has_unsupported_number,
     locate_quote,
     with_type_prefix,
     quote_in_transcript,
@@ -203,11 +205,60 @@ def test_type_prefix_is_not_added_twice(note_type, text):
     assert with_type_prefix(text, note_type, "ko") == text
 
 
+EXAM_SPAN = Span(page=3, start=0, end=30, transcript="이 base case가 시험에 나옵니다. 그리고 멈춥니다.")
+
+
 def test_notes_get_their_prefix_and_keep_their_quote():
-    reply = json.dumps([{**GOOD, "type": "exam_hint", "note": "base case에서 멈춤"}])
-    note = generate_span_notes(SPAN, PAGE, ScriptedProvider(reply))[0]
-    assert note.note == "★ 시험: base case에서 멈춤"
-    assert note.quote == GOOD["quote"]
+    quote = "이 base case가 시험에 나옵니다"
+    reply = json.dumps([{**GOOD, "type": "exam_hint", "note": "base case 출제", "quote": quote}])
+    note = generate_span_notes(EXAM_SPAN, PAGE, ScriptedProvider(reply))[0]
+    assert note.note == "★ 시험: base case 출제"
+    assert note.type == "exam_hint"
+    assert note.quote == quote
+
+
+def test_an_exam_hint_without_exam_words_in_its_quote_loses_the_claim():
+    reply = json.dumps(
+        [{**GOOD, "type": "exam_hint", "note": "★ 시험: 멈춤", "quote": "그리고 멈춥니다"}]
+    )
+    note = generate_span_notes(EXAM_SPAN, PAGE, ScriptedProvider(reply))[0]
+    assert note.type == "emphasis"
+    assert note.note == "멈춤"
+
+
+@pytest.mark.parametrize(
+    ("quote", "supported"),
+    [
+        ("이건 시험에 나옵니다", True),
+        ("기말고사 범위입니다", True),
+        ("This will be on the exam", True),
+        ("You will see this on a test", True),
+        ("이건 정말 중요합니다", False),
+        ("Remember this", False),
+        ("the latest result", False),
+    ],
+)
+def test_exam_words(quote, supported):
+    assert (checked_note_type("exam_hint", quote) == "exam_hint") is supported
+
+
+@pytest.mark.parametrize(
+    ("note_text", "quote", "unsupported"),
+    [
+        ("속도 3~4배 빠름", "미니배치가 훨씬 빠릅니다", True),
+        ("n_init=1 설정", "초기값을 직접 지정합니다", True),
+        ("5개 선택", "랜덤하게 5개를 선택합니다", False),
+        ("O(n) 필요", "메모리가 더 필요합니다", False),
+        ("x 2.5 증가", "2.5배 증가합니다", False),
+    ],
+)
+def test_numbers_in_a_note_must_be_in_its_quote(note_text, quote, unsupported):
+    assert has_unsupported_number(note_text, quote) is unsupported
+
+
+def test_a_note_with_an_invented_number_is_dropped():
+    invented = {**GOOD, "note": "속도 3~4배 빠름"}
+    assert generate_span_notes(SPAN, PAGE, ScriptedProvider(json.dumps([invented]))) == []
 
 
 def test_quote_reaches_the_viewer():

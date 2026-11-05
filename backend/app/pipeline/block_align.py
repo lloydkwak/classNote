@@ -25,6 +25,11 @@ MAX_BATCH_CHARS = 20_000
 MAX_BATCH_SPANS = 12
 MAX_CONSECUTIVE_BATCH_FAILURES = 2
 
+# Words that say something will be tested, needed in the quote of an exam hint. Narrower than
+# EMPHASIS: "important" alone doesn't promise a test question.
+EXAM_WORDS = re.compile(r"시험|기말|중간고사|출제|\bexams?\b|\btests?\b|\bquiz", re.IGNORECASE)
+NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
 TYPE_PREFIXES = {
     "exam_hint": {"ko": "★ 시험:", "en": "★ exam:"},
     "example": {"ko": "예)", "en": "e.g."},
@@ -68,9 +73,9 @@ Rules:
   For example, "여기서 제일 중요한 건 base case입니다. 없으면 안 멈춰요." becomes
   "base case 없음 → recursion 안 멈춤".
 - Only condense what the quote actually says. Do not add conclusions, explanations, or facts that
-  are not in the quote.
-- "exam_hint_candidates" lists emphasis words found in the transcript. Use type "exam_hint" when
-  the professor really is saying that something will be tested, and otherwise ignore them.
+  are not in the quote, even if they are on the slide. Do not write a number the quote doesn't say.
+- "exam_hint_candidates" lists emphasis words found in the transcript. Use type "exam_hint" only
+  when the quote itself says that something will be on a test, and otherwise ignore them.
 - Blocks with "kind": "figure" are charts or images, and their "text" describes what they show.
   When the professor refers to a figure ("look at this graph", "이 그래프 보면") or explains what it
   shows, attach the note to that figure's block.
@@ -108,6 +113,19 @@ class LLMNote(BaseModel):
     importance: int = 1
 
 
+def checked_note_type(note_type: str, quote: str) -> str:
+    """A false "this is on the exam" misleads students, so it needs support in the quote."""
+    if note_type == "exam_hint" and not EXAM_WORDS.search(quote):
+        return "emphasis"
+    return note_type
+
+
+def has_unsupported_number(note: str, quote: str) -> bool:
+    """Models add figures from the slide or from nowhere, which is easy to catch and costly."""
+    said = set(NUMBER.findall(quote))
+    return any(number not in said for number in NUMBER.findall(note))
+
+
 def with_type_prefix(text: str, note_type: str, language: str) -> str:
     """Make sure a note starts with its type's marker, whatever the LLM wrote."""
     prefixes = TYPE_PREFIXES.get(note_type)
@@ -117,6 +135,16 @@ def with_type_prefix(text: str, note_type: str, language: str) -> str:
     if text.startswith(tuple(prefixes.values())):
         return text
     return f"{prefixes.get(language, prefixes['en'])} {text}"
+
+
+def strip_type_prefix(text: str) -> str:
+    """Remove a marker the LLM wrote, since the note's type may have just changed."""
+    text = text.strip()
+    for prefixes in TYPE_PREFIXES.values():
+        for prefix in prefixes.values():
+            if text.startswith(prefix):
+                return text[len(prefix) :].strip()
+    return text
 
 
 def build_spans(alignment: Alignment, max_seconds: float = MAX_SPAN_SECONDS) -> list[Span]:
@@ -276,13 +304,17 @@ def _notes_from_rows(
         if not quote_in_transcript(note.quote, span.transcript):
             log.info("Dropping a note whose quote isn't in the transcript: %r", note.quote[:60])
             continue
+        if has_unsupported_number(note.note, note.quote):
+            log.info("Dropping a note with a number its quote doesn't say: %r", note.note[:60])
+            continue
+        note_type = checked_note_type(note.type, note.quote)
         start, end = locate_quote(note.quote, span_segments) or (span.start, span.end)
         notes.append(
             Note(
                 page=span.page,
                 block_ids=[block_id for block_id in note.block_ids if block_id in block_ids],
-                type=note.type,
-                note=with_type_prefix(note.note, note.type, note.language),
+                type=note_type,
+                note=with_type_prefix(strip_type_prefix(note.note), note_type, note.language),
                 quote=note.quote,
                 language=note.language,
                 importance=note.importance,

@@ -115,6 +115,7 @@ README.md
   - Choose each note's language and keep technical terms as described in the Language rules.
   - Do not invent anything. The `quote` must actually appear in the transcript — verify this in code (allow minor whitespace/punctuation differences) and drop notes that fail.
   - If a note doesn't correspond to a specific block, leave `block_ids` empty and treat it as a page-level note.
+- Check in code what can be checked: an `exam_hint` needs exam wording in its quote, or it becomes `emphasis`, and a note with a number its quote doesn't say is dropped.
 - Also detect emphasis with simple rules in both languages (e.g. Korean: "시험", "중요", "꼭", "외워"; English: "exam", "important", "remember", "make sure") and pass matches to the LLM as `exam_hint` candidates.
 - Attach the source span's `start` and `end` timestamps to each note.
 

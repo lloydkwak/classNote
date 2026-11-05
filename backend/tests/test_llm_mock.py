@@ -55,6 +55,7 @@ def test_long_notes_stay_within_the_limit_without_inventing_words():
 
 def test_one_english_sentence_does_not_flip_a_korean_lecture():
     notes = ask("이 recursion이 멈춥니다. Remember this one. 시험에 꼭 나옵니다.", KOREAN_LECTURE, ["시험"])
+    assert notes[-1]["note"].startswith("시험")
     assert {note["language"] for note in notes} == {"ko"}
     assert notes[-1]["type"] == "exam_hint"
 
