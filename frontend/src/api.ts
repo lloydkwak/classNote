@@ -90,7 +90,7 @@ async function errorMessage(response: Response): Promise<string> {
   } catch {
     // The body wasn't JSON, so fall through to the status code.
   }
-  return `Request failed (${response.status})`
+  return `요청을 처리하지 못했습니다 (${response.status})`
 }
 
 async function getJson<T>(url: string): Promise<T> {

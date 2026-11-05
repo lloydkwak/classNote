@@ -19,8 +19,8 @@ def find_ffmpeg() -> str:
     found = configured or shutil.which("ffmpeg")
     if not found:
         raise FfmpegError(
-            "ffmpeg was not found. Install it (Windows: winget install Gyan.FFmpeg), "
-            "open a new terminal, or set FFMPEG_PATH in .env."
+            "ffmpeg를 찾을 수 없습니다. 설치한 뒤(Windows: winget install Gyan.FFmpeg) "
+            "터미널을 새로 열거나, .env에 FFMPEG_PATH를 설정해 주세요."
         )
     return found
 
@@ -29,7 +29,7 @@ def _run_ffmpeg(*args: str) -> None:
     command = [find_ffmpeg(), "-y", "-hide_banner", "-loglevel", "error", *args]
     result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
-        raise FfmpegError(f"ffmpeg failed: {result.stderr.strip()}")
+        raise FfmpegError(f"ffmpeg 실행 실패: {result.stderr.strip()}")
 
 
 def convert_to_mp3(source: Path, output: Path) -> Path:

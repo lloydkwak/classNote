@@ -11,10 +11,10 @@ import {
 import { useRecorder } from './useRecorder'
 
 const STEPS: { state: JobState; label: string }[] = [
-  { state: 'extracting_pdf', label: 'Reading the slides' },
-  { state: 'transcribing', label: 'Transcribing the recording' },
-  { state: 'aligning', label: 'Matching speech to slides' },
-  { state: 'writing_notes', label: 'Writing notes' },
+  { state: 'extracting_pdf', label: '슬라이드 읽는 중' },
+  { state: 'transcribing', label: '녹음 받아쓰는 중' },
+  { state: 'aligning', label: '음성과 슬라이드 맞추는 중' },
+  { state: 'writing_notes', label: '노트 작성 중' },
 ]
 const POLL_MS = 1500
 const LIVE_POLL_MS = 400
@@ -22,9 +22,9 @@ const CHUNK_MS = Number(import.meta.env.VITE_LIVE_CHUNK_SECONDS ?? 60) * 1000
 
 // The empty value uses the server's default for the mode.
 const SPEECH_MODELS = [
-  { value: '', label: 'Default' },
-  { value: 'small', label: 'small (fast)' },
-  { value: 'large-v3-turbo', label: 'large-v3-turbo (more accurate, slower)' },
+  { value: '', label: '기본값' },
+  { value: 'small', label: 'small (빠름)' },
+  { value: 'large-v3-turbo', label: 'large-v3-turbo (더 정확, 느림)' },
 ]
 
 function formatTimer(seconds: number) {
@@ -76,13 +76,13 @@ function DropZone(props: {
 }
 
 function liveStatusText(status: JobStatus | null, stopped: boolean, chunksSent: number) {
-  if (!status || status.status === 'preparing') return 'Preparing the slides…'
+  if (!status || status.status === 'preparing') return '슬라이드 준비 중…'
   if (stopped) {
-    return `Finishing up: ${status.note_count} notes so far…`
+    return `마무리하는 중… 지금까지 노트 ${status.note_count}개`
   }
-  if (status.status === 'ready') return 'Ready to record.'
-  if (chunksSent === 0) return 'Recording…'
-  return `Processed ${status.chunks_processed} of ${chunksSent} parts. ${status.note_count} notes so far.`
+  if (status.status === 'ready') return '녹음할 준비가 됐습니다.'
+  if (chunksSent === 0) return '녹음 중…'
+  return `${chunksSent}개 구간 중 ${status.chunks_processed}개 처리 완료 · 노트 ${status.note_count}개`
 }
 
 export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
@@ -156,7 +156,7 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
         setLiveStatus(status)
         if (status.status === 'done') return onDone(liveId)
         if (status.status === 'error') {
-          setError(status.error ?? 'Processing failed.')
+          setError(status.error ?? '처리에 실패했습니다.')
           return
         }
       } catch {
@@ -218,7 +218,7 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
         setState(status.status)
         if (status.status === 'done') return onDone(jobId)
         if (status.status === 'error') {
-          setError(status.error ?? 'Processing failed.')
+          setError(status.error ?? '처리에 실패했습니다.')
           return
         }
       } catch {
@@ -248,23 +248,23 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
     <main className="upload">
       <h1>LectureNote</h1>
       <p className="lede">
-        Upload a lecture recording and its slides. What the professor said gets attached to the
-        exact spot on each slide.
+        강의 녹음과 슬라이드를 올리면, 교수님이 한 말을 슬라이드의 해당 위치에 손글씨 노트로
+        적어 드립니다.
       </p>
 
       {!jobId && (
         <>
           <div className="dropzones">
             <DropZone
-              title="Slides"
-              hint="Drop a PDF here, or click to choose"
+              title="슬라이드"
+              hint="PDF를 끌어다 놓거나 클릭해서 선택하세요"
               accept=".pdf,application/pdf"
               file={pdf}
               onFiles={addFiles}
             />
             <DropZone
-              title="Recording"
-              hint="Drop an audio file here, or click to choose"
+              title="녹음 파일"
+              hint="오디오 파일을 끌어다 놓거나 클릭해서 선택하세요"
               accept="audio/*,video/*,.m4a,.mp3,.wav"
               file={audio}
               onFiles={addFiles}
@@ -272,7 +272,7 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
           </div>
 
           <label className="model-choice">
-            Speech model
+            음성 인식 모델
             <select
               value={speechModel}
               disabled={showingLive}
@@ -294,13 +294,13 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
                   {formatTimer(recorder.seconds)}
                 </span>
                 <button onClick={stopRecording} disabled={recorder.state !== 'recording'}>
-                  Stop recording
+                  녹음 중지
                 </button>
               </>
             ) : (
               !stopped && (
                 <button disabled={!liveId} onClick={startRecording}>
-                  {pdf ? 'Record live' : 'Choose slides to record live'}
+                  {pdf ? '실시간 녹음 시작' : '슬라이드를 먼저 선택하세요'}
                 </button>
               )
             )}
@@ -317,7 +317,7 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
           )}
           {!showingLive && (
             <button className="primary" disabled={!pdf || !audio || uploading} onClick={start}>
-              {uploading ? 'Uploading…' : 'Start'}
+              {uploading ? '업로드 중…' : '시작'}
             </button>
           )}
         </>
@@ -338,7 +338,7 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
             ))}
           </ol>
           <p className="hint">
-            Transcribing on a laptop CPU can take about as long as the recording itself.
+            노트북 CPU에서는 받아쓰기에 녹음 길이만큼 시간이 걸릴 수 있습니다.
           </p>
         </>
       )}
@@ -346,7 +346,7 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
       {error && (
         <div className="error" role="alert">
           <p>{error}</p>
-          {jobId && <button onClick={reset}>Try again</button>}
+          {jobId && <button onClick={reset}>다시 시도</button>}
         </div>
       )}
     </main>

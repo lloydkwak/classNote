@@ -66,7 +66,7 @@ def test_convert_reports_a_bad_input_file(tmp_path):
     document.new_page()
     not_audio = tmp_path / "slides.pdf"
     document.save(not_audio)
-    with pytest.raises(FfmpegError, match="ffmpeg failed"):
+    with pytest.raises(FfmpegError, match="ffmpeg 실행 실패"):
         convert_to_mp3(not_audio, tmp_path / "audio.mp3")
 
 

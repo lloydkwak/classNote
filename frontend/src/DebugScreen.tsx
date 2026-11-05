@@ -98,7 +98,7 @@ function Chart({ alignment }: { alignment: Alignment }) {
         width={width}
         height={HEIGHT}
         role="img"
-        aria-label="Page explained over time, for raw argmax and the DP alignment. The table below has the same data."
+        aria-label="시간에 따라 설명 중인 페이지를 raw argmax와 DP 정렬로 비교한 차트입니다. 아래 표에 같은 데이터가 있습니다."
         onPointerMove={onPointerMove}
         onPointerLeave={() => setHovered(null)}
       >
@@ -129,7 +129,7 @@ function Chart({ alignment }: { alignment: Alignment }) {
           </text>
         ))}
         <text className="tick" x={12} y={MARGIN.top + plotHeight / 2} transform={`rotate(-90 12 ${MARGIN.top + plotHeight / 2})`} textAnchor="middle">
-          Page
+          페이지
         </text>
 
         {paths.map((path, index) => (
@@ -157,7 +157,7 @@ function Chart({ alignment }: { alignment: Alignment }) {
             // Keep the two labels apart when both series end on the same page.
             y={y(last.raw_page) + (lastDecided && last.raw_page === lastDecided.page ? 20 : 4)}
           >
-            Raw argmax
+            raw argmax
           </text>
         )}
 
@@ -179,10 +179,10 @@ function Chart({ alignment }: { alignment: Alignment }) {
           </strong>
           <dl>
             <dt>DP</dt>
-            <dd>{active.page ?? 'Off-topic'}</dd>
-            <dt>Raw argmax</dt>
+            <dd>{active.page ?? '주제 밖'}</dd>
+            <dt>raw argmax</dt>
             <dd>{active.raw_page}</dd>
-            <dt>Confidence</dt>
+            <dt>신뢰도</dt>
             <dd>{active.confidence.toFixed(2)}</dd>
           </dl>
           <p>{active.text.slice(0, 120)}</p>
@@ -218,14 +218,14 @@ export function DebugScreen({ jobId }: { jobId: string }) {
   return (
     <main className="debug">
       <header className="debug-header">
-        <h1>Alignment over time</h1>
+        <h1>시간별 정렬 결과</h1>
         <a className="button" href={`#/jobs/${jobId}`}>
-          Back to the slides
+          슬라이드로 돌아가기
         </a>
       </header>
       <p className="muted">
-        Picking the best page for each window on its own jumps around. The order-constrained DP
-        keeps the page steady unless the evidence is strong.
+        구간마다 가장 비슷한 페이지만 고르면(raw argmax) 페이지가 자주 튑니다. 순서 제약 DP는
+        근거가 뚜렷할 때만 페이지를 옮깁니다.
       </p>
 
       {error && (
@@ -238,56 +238,56 @@ export function DebugScreen({ jobId }: { jobId: string }) {
         <>
           <ul className="stat-row">
             <li>
-              <strong>{stats.windows}</strong> windows
+              <strong>{stats.windows}</strong> 구간
             </li>
             <li>
               <strong>
                 {stats.raw.moves} → {stats.dp.moves}
               </strong>{' '}
-              page changes, raw → DP
+              페이지 변경 (raw → DP)
             </li>
             <li>
               <strong>
                 {stats.raw.backward} → {stats.dp.backward}
               </strong>{' '}
-              backward jumps, raw → DP
+              뒤로 이동 (raw → DP)
             </li>
             <li>
-              <strong>{stats.changed}</strong> windows corrected by DP
+              <strong>{stats.changed}</strong> DP가 바꾼 구간
             </li>
             <li>
-              <strong>{stats.offTopic}</strong> off-topic windows
+              <strong>{stats.offTopic}</strong> 주제 밖 구간
             </li>
           </ul>
 
           <ul className="legend">
             <li>
-              <span className="swatch swatch-line" /> DP alignment
+              <span className="swatch swatch-line" /> DP 정렬
             </li>
             <li>
-              <span className="swatch swatch-dot" /> Raw argmax
+              <span className="swatch swatch-dot" /> raw argmax
             </li>
             <li>
-              <span className="swatch swatch-band" /> Off-topic
+              <span className="swatch swatch-band" /> 주제 밖
             </li>
           </ul>
 
           {alignment.windows.length > 0 ? (
             <Chart alignment={alignment} />
           ) : (
-            <p className="muted">This job has no windows yet.</p>
+            <p className="muted">아직 구간이 없습니다.</p>
           )}
 
           <details className="data-table">
-            <summary>Show as a table</summary>
+            <summary>표로 보기</summary>
             <table>
               <thead>
                 <tr>
-                  <th>Time</th>
+                  <th>시간</th>
                   <th>DP</th>
-                  <th>Raw argmax</th>
-                  <th>Confidence</th>
-                  <th>Transcript</th>
+                  <th>raw argmax</th>
+                  <th>신뢰도</th>
+                  <th>받아쓴 내용</th>
                 </tr>
               </thead>
               <tbody>
@@ -296,7 +296,7 @@ export function DebugScreen({ jobId }: { jobId: string }) {
                     <td>
                       {formatTime(window.start)}–{formatTime(window.end)}
                     </td>
-                    <td>{window.page ?? 'Off-topic'}</td>
+                    <td>{window.page ?? '주제 밖'}</td>
                     <td>{window.raw_page}</td>
                     <td>{window.confidence.toFixed(2)}</td>
                     <td>{window.text.slice(0, 80)}</td>

@@ -6,10 +6,10 @@ export type RecorderState = 'idle' | 'starting' | 'recording'
 
 function describeError(cause: unknown): string {
   if (cause instanceof DOMException && cause.name === 'NotAllowedError') {
-    return 'Microphone access was denied. Allow it in the browser, then try again.'
+    return '마이크 사용이 차단되었습니다. 브라우저에서 허용한 뒤 다시 시도해 주세요.'
   }
   if (cause instanceof DOMException && cause.name === 'NotFoundError') {
-    return 'No microphone was found.'
+    return '마이크를 찾을 수 없습니다.'
   }
   return cause instanceof Error ? cause.message : String(cause)
 }

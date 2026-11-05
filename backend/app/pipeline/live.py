@@ -53,7 +53,7 @@ def decode_to_wav(recording: Path, output: Path) -> None:
     ]  # fmt: skip
     result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
-        raise FfmpegError(f"ffmpeg failed: {result.stderr.strip()}")
+        raise FfmpegError(f"ffmpeg 실행 실패: {result.stderr.strip()}")
 
 
 def _wav_duration(path: Path) -> float:
@@ -236,7 +236,7 @@ class LiveSession:
     def _process(self, final: bool) -> None:
         recording = self.folder / RECORDING_NAME
         if not recording.exists():
-            raise ValueError("Nothing was recorded.")
+            raise ValueError("녹음된 내용이 없습니다.")
         timing: dict = {"final": final}
         clock = time.monotonic()
 
