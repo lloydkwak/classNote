@@ -367,6 +367,33 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.page-dots button {
+  position: relative;
+  color: var(--muted);
+}
+
+/* A dot, not only a color, so pages with notes stand out in any theme. */
+.page-dots .has-notes {
+  color: var(--text);
+  font-weight: 600;
+  border-color: var(--accent);
+}
+
+.page-dots .has-notes::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.page-dots .current.has-notes::after {
+  background: var(--on-accent);
+}
+
 .page-dots .current {
   color: var(--on-accent);
   background: var(--accent);

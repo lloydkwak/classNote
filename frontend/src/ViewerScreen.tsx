@@ -234,18 +234,21 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
           )}
           </div>
         </div>
-        <nav className="page-dots" aria-label="Pages with notes">
-          {[...annotatedPages]
-            .sort((a, b) => a - b)
-            .map((number) => (
+        <nav className="page-dots" aria-label="Pages">
+          {Array.from({ length: pageCount }, (_, index) => index + 1).map((number) => {
+            const hasNotes = annotatedPages.has(number)
+            return (
               <button
                 key={number}
-                className={number === page ? 'current' : undefined}
+                className={`${number === page ? 'current' : ''}${hasNotes ? ' has-notes' : ''}`}
+                aria-current={number === page ? 'page' : undefined}
+                aria-label={hasNotes ? `Page ${number}, has notes` : `Page ${number}`}
                 onClick={() => goToPage(number)}
               >
                 {number}
               </button>
-            ))}
+            )
+          })}
         </nav>
       </section>
 
