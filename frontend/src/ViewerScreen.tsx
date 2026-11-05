@@ -4,12 +4,15 @@ import 'react-pdf/dist/Page/TextLayer.css'
 import {
   annotatedPdfUrl,
   audioUrl,
+  getAlignment,
   getAnnotations,
   pdfUrl,
+  type AlignedWindow,
   type Annotation,
   type Annotations,
   type NoteType,
 } from './api'
+import { formatTime } from './format'
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -31,11 +34,6 @@ const TYPE_LABELS: Record<NoteType, string> = {
   question: 'Question',
 }
 
-function formatTime(seconds: number) {
-  const whole = Math.floor(seconds)
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
-}
-
 /** Each side of the page gets this share of its width to write in. Matches layout.py. */
 const GUTTER_RATIO = 0.24
 const SHEET_WIDTH_RATIO = 1 + 2 * GUTTER_RATIO
@@ -44,6 +42,16 @@ const toPoints = (stroke: [number, number][]) => stroke.map(([x, y]) => `${x},${
 
 function isPlaying(note: Annotation, time: number) {
   return time >= note.start && time < note.end
+}
+
+/** The page being explained at this time. Off-topic moments stay on the page before them. */
+function pageAtTime(windows: AlignedWindow[], time: number) {
+  let page: number | null = null
+  for (const window of windows) {
+    if (window.start > time) break
+    if (window.page !== null) page = window.page
+  }
+  return page
 }
 
 export function ViewerScreen({ jobId }: { jobId: string }) {
@@ -55,6 +63,8 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
   const [time, setTime] = useState(0)
   const [hasAudio, setHasAudio] = useState(true)
   const [pageWidth, setPageWidth] = useState(0)
+  const [follow, setFollow] = useState(true)
+  const [windows, setWindows] = useState<AlignedWindow[]>([])
   const audioRef = useRef<HTMLAudioElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
 
@@ -66,6 +76,10 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
         if (loaded.pages.length > 0) setPage(loaded.pages[0].page)
       })
       .catch((cause) => setError(cause.message))
+    // Following needs this, but the slides and notes work without it.
+    getAlignment(jobId)
+      .then((alignment) => setWindows(alignment.windows))
+      .catch(() => setWindows([]))
   }, [jobId])
 
   useEffect(() => {
@@ -87,8 +101,24 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
     [annotations],
   )
 
+  const activeNote = notes.find((note) => isPlaying(note, time))
+  const activeCardRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (follow) activeCardRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [follow, activeNote?.id])
+
   const goToPage = (next: number) => {
+    // Choosing a page by hand means stopping following, or the next tick would undo it.
+    setFollow(false)
     setPage(Math.min(Math.max(next, 1), pageCount || 1))
+  }
+
+  const onTimeUpdate = (audio: HTMLAudioElement) => {
+    setTime(audio.currentTime)
+    if (!follow || audio.paused) return
+    const target = pageAtTime(windows, audio.currentTime)
+    if (target !== null) setPage(target)
   }
 
   const playNote = (note: Annotation) => {
@@ -102,8 +132,14 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement) return
-      if (event.key === 'ArrowRight') setPage((value) => Math.min(value + 1, pageCount || 1))
-      if (event.key === 'ArrowLeft') setPage((value) => Math.max(value - 1, 1))
+      if (event.key === 'ArrowRight') {
+        setFollow(false)
+        setPage((value) => Math.min(value + 1, pageCount || 1))
+      }
+      if (event.key === 'ArrowLeft') {
+        setFollow(false)
+        setPage((value) => Math.max(value - 1, 1))
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -130,9 +166,22 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
             ›
           </button>
         </div>
-        <a className="button" href={annotatedPdfUrl(jobId)} download="annotated.pdf">
-          Download annotated.pdf
-        </a>
+        <div className="toolbar-actions">
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={follow}
+              onChange={(event) => setFollow(event.target.checked)}
+            />
+            Follow along
+          </label>
+          <a className="button" href={`#/jobs/${jobId}/debug`}>
+            Alignment
+          </a>
+          <a className="button" href={annotatedPdfUrl(jobId)} download="annotated.pdf">
+            Download annotated.pdf
+          </a>
+        </div>
       </header>
 
       {annotations?.incomplete && (
@@ -144,7 +193,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
 
       <section className="slide-pane">
         <div className="stage" ref={stageRef}>
-          <div className="sheet">
+          <div className={`sheet${follow && activeNote ? ' has-active' : ''}`}>
           <div
             className="page-frame"
             style={{
@@ -266,6 +315,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
           {notes.map((note) => (
             <li key={note.id}>
               <button
+                ref={note.id === activeNote?.id ? activeCardRef : undefined}
                 className={`note-card${selectedId === note.id ? ' selected' : ''}${
                   isPlaying(note, time) ? ' playing' : ''
                 }`}
@@ -293,7 +343,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
             controls
             preload="metadata"
             src={audioUrl(jobId)}
-            onTimeUpdate={(event) => setTime(event.currentTarget.currentTime)}
+            onTimeUpdate={(event) => onTimeUpdate(event.currentTarget)}
             onError={() => setHasAudio(false)}
           />
         ) : (

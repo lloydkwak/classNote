@@ -43,6 +43,22 @@ export interface Annotations {
   incomplete: boolean
 }
 
+export interface AlignedWindow {
+  window_id: number
+  start: number
+  end: number
+  text: string
+  page: number | null
+  raw_page: number
+  confidence: number
+  similarities: number[]
+}
+
+export interface Alignment {
+  windows: AlignedWindow[]
+  pages: number[]
+}
+
 export type JobState =
   | 'queued'
   | 'extracting_pdf'
@@ -116,5 +132,6 @@ export async function sendChunk(jobId: string, index: number, chunk: Blob) {
 export const finishLiveJob = (jobId: string) => postForm(`/api/jobs/${jobId}/finish`)
 
 export const getStatus = (jobId: string) => getJson<JobStatus>(`/api/jobs/${jobId}`)
+export const getAlignment = (jobId: string) => getJson<Alignment>(`/api/jobs/${jobId}/debug`)
 export const getAnnotations = (jobId: string) =>
   getJson<Annotations>(`/api/jobs/${jobId}/annotations`)
