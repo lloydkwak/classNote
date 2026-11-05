@@ -30,6 +30,14 @@ def _overlap(sentence: str, block_text: str) -> int:
     return sum(word.lower() in words for word in re.findall(r"[^\W_]{2,}", sentence))
 
 
+def _span_language(sentences: list[str], lecture_sample: str) -> str:
+    """Like the real prompt: the lecture's main language, unless the whole span is another."""
+    main = _language(lecture_sample or " ".join(sentences))
+    if sentences and all(_language(sentence) != main for sentence in sentences):
+        return _language(sentences[0])
+    return main
+
+
 def _note_for(sentence: str, blocks: list[dict], is_candidate: bool) -> dict:
     best = max(blocks, key=lambda block: _overlap(sentence, block["text"]), default=None)
     linked = best is not None and _overlap(sentence, best["text"]) > 0
@@ -67,12 +75,16 @@ class MockProvider(LLMProvider):
             return json.dumps({"ok": True})  # A connection check, not a request for notes.
         request = json.loads(payload)
         candidates = request.get("exam_hint_candidates", [])
+        sentences = _sentences(request.get("transcript", ""))
+        language = _span_language(sentences, request.get("lecture_sample", ""))
+        # It can't translate, so it only writes notes on sentences already in that language.
         notes = [
             _note_for(
                 sentence,
                 request.get("blocks", []),
                 any(candidate in sentence for candidate in candidates),
             )
-            for sentence in _sentences(request.get("transcript", ""))
+            for sentence in sentences
+            if _language(sentence) == language
         ]
         return json.dumps(notes, ensure_ascii=False)

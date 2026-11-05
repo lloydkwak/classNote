@@ -20,7 +20,7 @@ from app.llm.base import LIVE_RETRY, LLMProvider, QuotaExhausted
 from app.models import AlignedWindow, Alignment, Note, Segment, Span
 from app.pipeline import run as pipeline
 from app.pipeline.audio import FfmpegError, convert_to_mp3, find_ffmpeg
-from app.pipeline.block_align import build_prompt, build_spans, generate_span_notes
+from app.pipeline.block_align import build_spans, generate_span_notes
 from app.pipeline.figure_caption import caption_figures
 from app.pipeline.page_align import align_windows, get_embedder, page_text
 from app.pipeline.stt import build_prompt as build_stt_prompt
@@ -91,7 +91,7 @@ class LiveSession:
         self._segments: list[Segment] = []
         self._frozen_pages: list[int | None] = []
         self._notes_by_span: dict[tuple[int, float], list[Note]] = {}
-        self._failed_spans: set[str] = set()
+        self._failed_spans: set[tuple[int, float]] = set()
         self._complete = True
         self._timings: list[dict] = []
 
@@ -193,8 +193,8 @@ class LiveSession:
 
     def _write_span_notes(self, span: Span, extraction) -> None:
         page = next(item for item in extraction.pages if item.page == span.page)
-        prompt = build_prompt(span, page)
-        if prompt in self._failed_spans or not self._llm_available or self._llm is None:
+        key = self._span_key(span)
+        if key in self._failed_spans or not self._llm_available or self._llm is None:
             self._complete = False
             return
         try:
@@ -206,7 +206,7 @@ class LiveSession:
             return
         except Exception as error:  # One overloaded call must not stall the talk.
             log.warning("Skipping notes for page %d at %.0fs: %s", span.page, span.start, error)
-            self._failed_spans.add(prompt)
+            self._failed_spans.add(key)
             self._complete = False
             return
         self._notes_by_span[self._span_key(span)] = notes

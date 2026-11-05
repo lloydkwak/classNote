@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 # Long spans are split, so a note's playback range stays near where it was said.
 MAX_SPAN_SECONDS = 300.0
+LECTURE_SAMPLE_CHARS = 300
 
 EMPHASIS = re.compile(
     r"시험|중요|꼭|외워|\bexams?\b|\bimportant\b|\bremember\b|\bmake sure\b",
@@ -33,17 +34,20 @@ Return a JSON array of notes. Each note has these fields:
 - "type": one of "explanation", "example", "emphasis", "exam_hint", "question"
 - "note": 1-2 sentences
 - "quote": the exact part of the transcript this note is based on, copied word for word
-- "language": "ko" or "en", the language of the note
+- "language": "ko" or "en", the language the note is actually written in
 - "importance": a whole number from 1 (minor) to 5 (critical)
 
 Rules:
 - Only note information that is NOT already on the slide. Do not repeat the slide.
-- Write each note in the language the professor used in that part of the lecture. For mixed
-  speech, follow the dominant language.
-- Never translate technical terms. Keep domain terms, names, and jargon exactly as the professor
-  said them or as they appear on the slide, including inside a note in another language. If the
-  transcript spells a term phonetically or mishears it, use the slide's spelling. For example,
-  write "recursion" and "base case" inside a Korean note, not a Korean translation of them.
+- Write each note in the language that will be clearest to a student of this course. Usually
+  that is the main language of the lecture, which "lecture_sample" shows. Keep the notes on a
+  slide, and across the lecture, in one language unless there is a good reason to switch, such as
+  a whole section taught in another language, or a note that is almost entirely English terms.
+  One sentence in another language is not a reason to switch.
+- Keep technical terms as they are commonly written in the field, as said or as on the slide,
+  rather than translating them. If the transcript spells a term phonetically or mishears it, use
+  the slide's spelling. For example, "recursion" and "base case" stay in English inside a Korean
+  note.
 - Do not invent anything. Every note must be supported by its quote.
 - "exam_hint_candidates" lists emphasis words found in the transcript. Use type "exam_hint" when
   the professor really is saying that something will be tested, and otherwise ignore them.
@@ -133,8 +137,18 @@ def locate_quote(quote: str, segments: Sequence[Segment]) -> tuple[float, float]
     return first.start, last.end
 
 
-def build_prompt(span: Span, page: Page) -> str:
+def sample_lecture(segments: Sequence[Segment]) -> str:
+    """Take text from across the lecture, so one request can tell its main language."""
+    if not segments:
+        return ""
+    # Enough evenly spaced segments to reach the limit, at about 50 characters each.
+    step = max(1, len(segments) // max(1, LECTURE_SAMPLE_CHARS // 50))
+    return " ".join(segment.text for segment in segments[::step])[:LECTURE_SAMPLE_CHARS]
+
+
+def build_prompt(span: Span, page: Page, segments: Sequence[Segment] = ()) -> str:
     request = {
+        "lecture_sample": sample_lecture(segments) or span.transcript[:LECTURE_SAMPLE_CHARS],
         "blocks": [
             {"block_id": block.block_id, "kind": block.kind, "text": block.text}
             for block in page.blocks
@@ -170,7 +184,7 @@ def generate_span_notes(
     span: Span, page: Page, provider: LLMProvider, segments: Sequence[Segment] = ()
 ) -> list[Note]:
     """`segments` is the whole transcript, used to time each note by when it was said."""
-    prompt = build_prompt(span, page)
+    prompt = build_prompt(span, page, segments)
     try:
         rows = cached_json(
             "llm", [provider.name, provider.model, prompt], lambda: _ask_llm(provider, prompt)

@@ -66,7 +66,7 @@ PDF extraction → figure captions → audio conversion + STT → windowing → 
 
 ## Rules that span multiple modules
 
-- **Language:** write each note in the language the professor used in that part of the lecture, and never translate technical terms. Lectures may be Korean, English, or code-switched mid-sentence. Don't hard-code Korean into the logic, and don't force Whisper's `language` parameter by default (it's an optional override).
+- **Language:** the LLM chooses each note's language by judgment: whichever is clearest to a student of the course, usually the lecture's main language, staying consistent on a slide and across the lecture. Don't reintroduce a rule that a note follows the language of its span, because one English sentence would flip it. Keep technical terms as commonly written in the field, and set `language` to the language actually used. Lectures may be Korean, English, or code-switched mid-sentence, so don't hard-code Korean into the logic, and don't force Whisper's `language` parameter by default (it's an optional override).
 - **Bounding boxes:** normalize them to 0–1 relative to page size. Both the frontend overlay and the PDF export use these values.
 - **Note integrity:** LLM output is validated with pydantic and retried once on failure. Each note's `quote` must be verified in code against the transcript, allowing minor whitespace and punctuation differences, and notes that fail are dropped. Notes contain only information that isn't already on the slide.
 - **E5 embeddings:** use the `query:` and `passage:` prefixes the model requires.

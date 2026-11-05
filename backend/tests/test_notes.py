@@ -291,6 +291,17 @@ def test_consolidate_attaches_bboxes_and_handles_page_level_notes():
     assert result.job_id == "job"
 
 
+def test_prompt_uses_judgment_about_language_and_shows_the_lecture():
+    segments = [Segment(start=i, end=i + 1, text=f"강의 내용 {i}") for i in range(200)]
+    prompt = block_align.build_prompt(SPAN, PAGE, segments)
+    assert "clearest to a student" in prompt
+    assert "language the professor used" not in prompt
+    sample = json.loads(prompt.rpartition("INPUT_JSON:")[2])["lecture_sample"]
+    # It reaches across the lecture, not only its opening.
+    assert "강의 내용 0" in sample and "강의 내용 33" in sample
+    assert len(sample) <= block_align.LECTURE_SAMPLE_CHARS
+
+
 def test_full_pipeline_with_mocks_keeps_language_and_technical_terms(tmp_path):
     """No API keys or downloads: mock STT, LLM, and embeddings on a mixed transcript."""
     pdf = tmp_path / "slides.pdf"
@@ -311,7 +322,9 @@ def test_full_pipeline_with_mocks_keeps_language_and_technical_terms(tmp_path):
     for item in notes:
         hangul = bool(re.search(r"[가-힣]", item.note))
         assert item.language == ("ko" if hangul else "en")
-    assert {item.language for item in notes} == {"ko", "en"}
+    # This lecture is mainly Korean, so a slide's notes don't flip between languages.
+    for page in annotations.pages:
+        assert len({item.language for item in page.notes}) == 1
 
     korean = " ".join(item.note for item in notes if item.language == "ko")
     # These stay in English inside Korean notes. Their translations must not appear.
