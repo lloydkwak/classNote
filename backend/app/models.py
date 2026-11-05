@@ -126,6 +126,7 @@ class PageAnnotations(BaseModel):
 class Annotations(BaseModel):
     job_id: str
     pages: list[PageAnnotations]
+    note_font: str = "pretendard"  # Both renderers must use the font the layout measured.
     incomplete: bool = False  # The LLM's quota ran out, so some slides have no notes yet.
 
 

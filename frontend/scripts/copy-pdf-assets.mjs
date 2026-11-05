@@ -4,5 +4,7 @@ import { cpSync } from 'node:fs'
 for (const name of ['cmaps', 'standard_fonts']) {
   cpSync(`node_modules/pdfjs-dist/${name}`, `public/${name}`, { recursive: true })
 }
-// The backend's layout measures text with this same file, so line breaks match.
-cpSync('../backend/assets/fonts/NanumPenScript-Regular.ttf', 'public/fonts/NanumPenScript-Regular.ttf')
+// The backend's layout measures text with these same files, so line breaks match.
+for (const name of ['Pretendard-Medium.otf', 'NanumPenScript-Regular.ttf']) {
+  cpSync(`../backend/assets/fonts/${name}`, `public/fonts/${name}`)
+}

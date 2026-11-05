@@ -145,6 +145,7 @@ README.md
 - Use PyMuPDF to draw the notes on the original PDF and save as `annotated.pdf`.
 - Draw notes like real handwriting instead of flat boxes: underline for text blocks, a circle or bracket around figures, and an arrow from the annotation to a note in the nearest margin. Margin notes must not overlap each other. The viewer draws the same thing.
 - Use different colors per note type (e.g. red tones for exam hints).
+- Write note text in a clean, readable font (Pretendard by default, set with `NOTE_FONT`), with a minimum size that stays readable on a projector. Marks and arrows stay hand-drawn.
 - Make sure Korean text renders correctly in annotations (check font handling).
 
 ## 5. API

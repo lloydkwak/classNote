@@ -24,7 +24,7 @@ export const TYPE_LABELS: Record<NoteType, string> = {
 }
 
 /** Each side of the page gets this share of its width to write in. Matches layout.py. */
-const GUTTER_RATIO = 0.24
+const GUTTER_RATIO = 0.28
 const SHEET_WIDTH_RATIO = 1 + 2 * GUTTER_RATIO
 
 const toPoints = (stroke: [number, number][]) => stroke.map(([x, y]) => `${x},${y}`).join(' ')
@@ -48,6 +48,7 @@ export function SlideSheet(props: {
   file: string
   page: number
   annotations?: PageAnnotations
+  noteFont?: string
   time?: number
   selectedId?: string | null
   dimInactive?: boolean
@@ -120,7 +121,7 @@ export function SlideSheet(props: {
         </div>
         {annotations && (
           <svg
-            className="ink"
+            className={`ink font-${props.noteFont ?? 'pretendard'}`}
             viewBox={`${-annotations.gutter} 0 ${annotations.width + 2 * annotations.gutter} ${
               annotations.height
             }`}

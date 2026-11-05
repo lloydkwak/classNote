@@ -15,13 +15,10 @@ import pymupdf
 
 from app.models import Block, Point, Sketch
 
-FONT_PATH = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "NanumPenScript-Regular.ttf"
+FONTS_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts"
 
-GUTTER_RATIO = 0.24  # Of page width, per side. The frontend uses the same value.
+GUTTER_RATIO = 0.28  # Of page width, per side. The frontend uses the same value.
 GUTTER_PADDING = 0.012  # Of page width.
-FONT_RATIO = 1 / 22  # Of page height. This font looks small for its size.
-MIN_FONT_RATIO = 1 / 50
-LINE_SPACING = 1.1
 NOTE_GAP = 0.8  # Of a line, between notes.
 FONT_SHRINK = 0.9
 CIRCLE_MAX_ASPECT = 2.6  # Longer or narrower figures get a bracket.
@@ -29,6 +26,23 @@ CIRCLE_MARGIN = 1.12
 WOBBLE_STEP = 18.0  # Points between hand-drawn points.
 WOBBLE = 0.7  # Points of jitter.
 ARROW_HEAD = 7.0  # Points.
+
+
+@dataclass(frozen=True)
+class NoteFont:
+    file: str
+    # Sizes are fractions of page width, like the gutter, so a line holds about the same
+    # number of characters on any slide shape, and sizes on screen stay predictable.
+    size_ratio: float
+    min_size_ratio: float
+    line_spacing: float
+
+
+NOTE_FONTS = {
+    "pretendard": NoteFont("Pretendard-Medium.otf", 1 / 50, 1 / 60, 1.3),
+    # This handwriting font looks small for its size.
+    "nanum-pen": NoteFont("NanumPenScript-Regular.ttf", 1 / 39, 1 / 60, 1.1),
+}
 
 
 @dataclass
@@ -39,9 +53,13 @@ class LayoutNote:
     blocks: list[Block]
 
 
-@lru_cache(maxsize=1)
-def handwriting_font() -> pymupdf.Font:
-    return pymupdf.Font(fontfile=str(FONT_PATH))
+def note_font_path(name: str) -> Path:
+    return FONTS_DIR / NOTE_FONTS[name].file
+
+
+@lru_cache(maxsize=None)
+def load_note_font(name: str) -> pymupdf.Font:
+    return pymupdf.Font(fontfile=str(note_font_path(name)))
 
 
 @lru_cache(maxsize=1)
@@ -49,35 +67,53 @@ def fallback_font() -> pymupdf.Font:
     return pymupdf.Font("cjk")
 
 
-def line_needs_fallback(line: str) -> bool:
-    """The handwriting font lacks some symbols, such as Greek letters and arrows."""
-    font = handwriting_font()
-    return any(not char.isspace() and not font.has_glyph(ord(char)) for char in line)
+def text_runs(line: str, font_name: str) -> list[tuple[str, bool]]:
+    """Split a line into (text, uses the fallback font) runs, as a browser does by glyph.
+
+    Note fonts lack some symbols, such as "∴". Changing only those keeps the rest of the
+    line in the note font.
+    """
+    font = load_note_font(font_name)
+    runs: list[tuple[str, bool]] = []
+    for char in line:
+        fallback = not char.isspace() and not font.has_glyph(ord(char))
+        if runs and (runs[-1][1] == fallback or char.isspace()):
+            runs[-1] = (runs[-1][0] + char, runs[-1][1])
+        else:
+            runs.append((char, fallback))
+    return runs
 
 
-def _text_width(text: str, font_size: float) -> float:
-    font = fallback_font() if line_needs_fallback(text) else handwriting_font()
+def run_width(text: str, fallback: bool, font_name: str, font_size: float) -> float:
+    font = fallback_font() if fallback else load_note_font(font_name)
     return font.text_length(text, fontsize=font_size)
+
+
+def text_width(text: str, font_name: str, font_size: float) -> float:
+    return sum(
+        run_width(run, fallback, font_name, font_size)
+        for run, fallback in text_runs(text, font_name)
+    )
 
 
 def gutter_width(page_width: float) -> float:
     return page_width * GUTTER_RATIO
 
 
-def wrap_text(text: str, width: float, font_size: float) -> list[str]:
+def wrap_text(text: str, width: float, font_size: float, font_name: str) -> list[str]:
     """Break at spaces, and inside a word only when it's wider than the whole line."""
     lines: list[str] = []
     current = ""
     for word in re.findall(r"\S+", text):
         candidate = f"{current} {word}" if current else word
-        if _text_width(candidate, font_size) <= width:
+        if text_width(candidate, font_name, font_size) <= width:
             current = candidate
             continue
         if current:
             lines.append(current)
         current = ""
         for char in word:
-            if _text_width(current + char, font_size) > width and current:
+            if text_width(current + char, font_name, font_size) > width and current:
                 lines.append(current)
                 current = ""
             current += char
@@ -261,20 +297,24 @@ def _assign(items: list[_Placed], page_height: float, gap: float) -> bool:
     return _stack(left, page_height, gap) and _stack(right, page_height, gap)
 
 
-def layout_page(notes: list[LayoutNote], width: float, height: float) -> list[Sketch]:
+def layout_page(
+    notes: list[LayoutNote], width: float, height: float, font_name: str = "pretendard"
+) -> list[Sketch]:
     """Return one sketch per note, in the same order."""
     gutter = gutter_width(width)
     padding = width * GUTTER_PADDING
     note_width = gutter - 2 * padding
-    font_size = height * FONT_RATIO
-    minimum = height * MIN_FONT_RATIO
+    note_font = NOTE_FONTS[font_name]
+    font_size = width * note_font.size_ratio
+    # Below this it's hard to read on a projector, so long notes get cut instead.
+    minimum = width * note_font.min_size_ratio
 
     while True:
-        line_height = font_size * LINE_SPACING
+        line_height = font_size * note_font.line_spacing
         gap = line_height * NOTE_GAP
         items = []
         for note in notes:
-            lines = wrap_text(note.text, note_width, font_size)
+            lines = wrap_text(note.text, note_width, font_size, font_name)
             items.append(
                 _Placed(
                     note,
@@ -286,8 +326,8 @@ def layout_page(notes: list[LayoutNote], width: float, height: float) -> list[Sk
             )
         if _assign(items, height, gap):
             break
-        if font_size * FONT_SHRINK >= minimum:
-            font_size *= FONT_SHRINK
+        if font_size > minimum:
+            font_size = max(font_size * FONT_SHRINK, minimum)
             continue
         # Even the smallest writing doesn't fit, so shorten the longest note and retry.
         longest = max(notes, key=lambda note: len(note.text))
@@ -302,8 +342,8 @@ def layout_page(notes: list[LayoutNote], width: float, height: float) -> list[Sk
         arrow: list[list[Point]] = []
         if anchor is not None:
             # Start from the end of the text, not the note's box, which may be much wider.
-            text_width = max(_text_width(line, font_size) for line in item.lines)
-            edge = x + text_width + 3 if item.side == "left" else x - 3
+            longest_line = max(text_width(line, font_name, font_size) for line in item.lines)
+            edge = x + longest_line + 3 if item.side == "left" else x - 3
             arrow = _arrow((edge, item.y + line_height * 0.6), anchor, rng)
         sketches[note.id] = Sketch(
             mark=mark,

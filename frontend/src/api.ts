@@ -42,6 +42,7 @@ export interface Annotations {
   job_id: string
   pages: PageAnnotations[]
   incomplete: boolean
+  note_font: string
 }
 
 export interface AlignedWindow {

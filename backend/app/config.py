@@ -25,6 +25,7 @@ class Settings:
     stt_language: str | None
     live_stt_model: str
     live_stt_cpu_threads: int
+    note_font: str
     embedding_provider: str
     embedding_model: str
     demo_mode: bool
@@ -44,6 +45,7 @@ def get_settings() -> Settings:
         stt_language=_optional("STT_LANGUAGE"),
         live_stt_model=os.environ.get("LIVE_STT_MODEL", "small"),
         live_stt_cpu_threads=int(os.environ.get("LIVE_STT_CPU_THREADS", "6")),
+        note_font=os.environ.get("NOTE_FONT", "pretendard"),
         embedding_provider=os.environ.get("EMBEDDING_PROVIDER", "e5"),
         embedding_model=os.environ.get("EMBEDDING_MODEL", "intfloat/multilingual-e5-base"),
         demo_mode=os.environ.get("DEMO_MODE", "0") == "1",

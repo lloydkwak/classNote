@@ -168,6 +168,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
           file={pdfUrl(jobId)}
           page={page}
           annotations={pageAnnotations}
+          noteFont={annotations?.note_font}
           time={time}
           selectedId={selectedId}
           dimInactive={follow && Boolean(activeNote)}
