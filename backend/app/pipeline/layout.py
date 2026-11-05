@@ -19,8 +19,8 @@ FONT_PATH = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "NanumPen
 
 GUTTER_RATIO = 0.24  # Of page width, per side. The frontend uses the same value.
 GUTTER_PADDING = 0.012  # Of page width.
-FONT_RATIO = 1 / 32  # Of page height.
-MIN_FONT_RATIO = 1 / 60
+FONT_RATIO = 1 / 22  # Of page height. This font looks small for its size.
+MIN_FONT_RATIO = 1 / 50
 LINE_SPACING = 1.1
 NOTE_GAP = 0.8  # Of a line, between notes.
 FONT_SHRINK = 0.9
@@ -301,7 +301,9 @@ def layout_page(notes: list[LayoutNote], width: float, height: float) -> list[Sk
         x = -gutter + padding if item.side == "left" else width + padding
         arrow: list[list[Point]] = []
         if anchor is not None:
-            edge = x + note_width + 2 if item.side == "left" else x - 2
+            # Start from the end of the text, not the note's box, which may be much wider.
+            text_width = max(_text_width(line, font_size) for line in item.lines)
+            edge = x + text_width + 3 if item.side == "left" else x - 3
             arrow = _arrow((edge, item.y + line_height * 0.6), anchor, rng)
         sketches[note.id] = Sketch(
             mark=mark,

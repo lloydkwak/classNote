@@ -112,6 +112,7 @@ def _draw_figures(page: pymupdf.Page) -> None:
     base = 460
     shape.draw_line((540, 180), (540, base))  # Axes.
     shape.draw_line((540, base), (900, base))
+    shape.finish(color=(0, 0, 0), width=1.5, closePath=False)
     for index, height in enumerate((80, 170, 250)):
         left = 570 + index * 110
         shape.draw_rect(pymupdf.Rect(left, base - height, left + 70, base))

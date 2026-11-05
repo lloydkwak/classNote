@@ -96,10 +96,16 @@ def test_note_stays_near_its_target_when_there_is_room():
 def test_arrow_runs_from_the_note_to_the_mark():
     sketch = only(blocks=[block((0.7, 0.2, 0.9, 0.3))])
     shaft = sketch.arrow[0]
-    assert shaft[0][0] == pytest.approx(sketch.x - 2)
+    assert shaft[0][0] == pytest.approx(sketch.x - 3)
     mark_points = [point for stroke in sketch.strokes for point in stroke]
     assert any(math.dist(shaft[-1], point) < 1 for point in mark_points)
     assert len(sketch.arrow) == 3  # A shaft and two head strokes.
+
+
+def test_left_arrow_starts_at_the_end_of_short_text():
+    sketch = only(text="Short", blocks=[block((0.1, 0.2, 0.3, 0.3))])
+    assert sketch.side == "left"
+    assert sketch.arrow[0][0][0] < sketch.x + sketch.width / 2
 
 
 def test_page_level_note_has_no_mark_or_arrow():
