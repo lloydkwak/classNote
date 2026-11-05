@@ -10,8 +10,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 from app.config import get_settings
-from app.models import Alignment, PdfExtraction, Segment, Window
+from app.models import Alignment, Annotations, Note, PdfExtraction, Segment, Window
 from app.pipeline.audio import convert_to_mp3
+from app.pipeline.block_align import generate_notes
+from app.pipeline.consolidate import consolidate
+from app.pipeline.figure_caption import caption_figures
+from app.pipeline.export_pdf import EXPORT_NAME, export_annotated_pdf
 from app.pipeline.page_align import align_windows
 from app.pipeline.pdf_extract import extract_pdf
 from app.pipeline.stt import transcribe
@@ -24,6 +28,9 @@ EXTRACTION_NAME = "extraction.json"
 SEGMENTS_NAME = "segments.json"
 WINDOWS_NAME = "windows.json"
 ALIGNMENT_NAME = "alignment.json"
+NOTES_NAME = "notes.json"
+NOTES_COMPLETE_NAME = "notes_complete.json"
+ANNOTATIONS_NAME = "annotations.json"
 
 
 def job_dir(job_id: str) -> Path:
@@ -63,6 +70,14 @@ def _step_extract(folder: Path) -> None:
     )
 
 
+def _step_caption(folder: Path) -> None:
+    extraction = _read_extraction(folder)
+    caption_figures(folder / PDF_NAME, extraction)
+    (folder / EXTRACTION_NAME).write_text(
+        extraction.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+
 def _step_transcribe(folder: Path) -> None:
     sources = sorted(folder.glob(f"{AUDIO_SOURCE_PREFIX}.*"))
     audio = convert_to_mp3(sources[0], folder / AUDIO_NAME) if sources else None
@@ -80,12 +95,44 @@ def _step_align(folder: Path) -> None:
     (folder / ALIGNMENT_NAME).write_text(alignment.model_dump_json(indent=2), encoding="utf-8")
 
 
+def _read_alignment(folder: Path) -> Alignment:
+    return Alignment.model_validate_json((folder / ALIGNMENT_NAME).read_text(encoding="utf-8"))
+
+
+def _step_notes(folder: Path) -> None:
+    notes, complete = generate_notes(_read_alignment(folder), _read_extraction(folder))
+    _write_models(folder / NOTES_NAME, notes)
+    (folder / NOTES_COMPLETE_NAME).write_text(json.dumps(complete), encoding="utf-8")
+
+
+def _step_consolidate(folder: Path) -> None:
+    annotations = consolidate(
+        _read_list(folder / NOTES_NAME, Note), _read_extraction(folder), folder.name
+    )
+    complete = json.loads((folder / NOTES_COMPLETE_NAME).read_text(encoding="utf-8"))
+    annotations.incomplete = not complete
+    (folder / ANNOTATIONS_NAME).write_text(
+        annotations.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+
+def _step_export(folder: Path) -> None:
+    annotations = Annotations.model_validate_json(
+        (folder / ANNOTATIONS_NAME).read_text(encoding="utf-8")
+    )
+    export_annotated_pdf(folder / PDF_NAME, annotations, folder / EXPORT_NAME)
+
+
 # (step name, status shown to the user, function), in run order.
 STEPS: list[tuple[str, str, Callable[[Path], None]]] = [
     ("extract", "extracting_pdf", _step_extract),
+    ("caption", "extracting_pdf", _step_caption),
     ("transcribe", "transcribing", _step_transcribe),
     ("window", "aligning", _step_window),
     ("align", "aligning", _step_align),
+    ("notes", "writing_notes", _step_notes),
+    ("consolidate", "writing_notes", _step_consolidate),
+    ("export", "writing_notes", _step_export),
 ]
 STEP_NAMES = [name for name, _, _ in STEPS]
 

@@ -72,6 +72,8 @@ README.md
 - Mark the page title separately (first block or largest-font block).
 - Mark pages with very little text as `low_text=true`.
 - Also produce a list of key terms (titles + frequent technical terms) to feed the STT prompt.
+- Also extract figure regions as blocks with `kind="figure"`: image blocks, plus vector drawings (`page.get_drawings()`) clustered into regions. Ignore tiny decorations and full-page backgrounds.
+- Render each figure to PNG and ask the LLM (multimodal) for a one-sentence description of what it shows, in the slide's language, keeping technical terms. Use it as the block's text, so page alignment and block matching can match speech like "이 그래프 보면" to the figure. Cache by image hash; in `DEMO_MODE` use the cache only. If the call fails, keep an empty caption rather than failing the job.
 
 ### 4.2 Audio + STT (`audio.py`, `stt.py`)
 - Convert the uploaded file to mono 16kHz mp3.
@@ -139,8 +141,9 @@ README.md
   ```
 
 ### 4.7 PDF export (`export_pdf.py`)
-- Use PyMuPDF to add highlight annotations + text annotations to the original PDF and save as `annotated.pdf`.
-- Use different highlight colors per note type (e.g. red tones for exam hints).
+- Use PyMuPDF to draw the notes on the original PDF and save as `annotated.pdf`.
+- Draw notes like real handwriting instead of flat boxes: underline for text blocks, a circle or bracket around figures, and an arrow from the annotation to a note in the nearest margin. Margin notes must not overlap each other. The viewer draws the same thing.
+- Use different colors per note type (e.g. red tones for exam hints).
 - Make sure Korean text renders correctly in annotations (check font handling).
 
 ## 5. API
@@ -155,7 +158,7 @@ README.md
 
 - **Upload screen:** drag-and-drop PDF and audio, show per-step progress.
 - **Viewer screen (the main demo screen):**
-  - Left: PDF pages, with translucent highlight overlays on annotated blocks
+  - Left: PDF pages, with handwritten-style marks and margin notes on annotated blocks
   - Right: note cards for the current page (with type badges)
   - Bottom: audio player
   - Clicking a highlight or card → play from that span

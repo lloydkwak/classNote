@@ -1,6 +1,7 @@
+import httpx
 import pytest
 
-from app.llm.base import MAX_RETRIES, with_backoff
+from app.llm.base import MAX_RETRIES, QuotaExhausted, with_backoff
 
 
 class RateLimited(Exception):
@@ -41,6 +42,59 @@ def test_retries_on_503():
         return "ok"
 
     assert with_backoff(call, sleep=lambda _: None) == "ok"
+
+
+def test_retries_on_network_failure():
+    calls = []
+
+    def call():
+        calls.append(1)
+        if len(calls) < 2:
+            raise httpx.ConnectError("getaddrinfo failed")
+        return "ok"
+
+    assert with_backoff(call, sleep=lambda _: None) == "ok"
+
+
+class DailyLimit(Exception):
+    code = 429
+    details = {
+        "error": {
+            "details": [
+                {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "77799s"}
+            ]
+        }
+    }
+
+
+class ShortLimit(DailyLimit):
+    details = {"error": {"details": [{"retryDelay": "30s"}]}}
+
+
+def test_a_daily_limit_fails_at_once_instead_of_waiting():
+    calls = []
+
+    def call():
+        calls.append(1)
+        raise DailyLimit()
+
+    with pytest.raises(QuotaExhausted):
+        with_backoff(call, sleep=lambda _: None)
+    assert len(calls) == 1
+
+
+def test_the_servers_short_delay_is_respected():
+    waits = []
+    outcomes = [ShortLimit(), "ok"]
+
+    def call():
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    assert with_backoff(call, sleep=waits.append) == "ok"
+    assert waits[0] >= 30
 
 
 def test_other_errors_are_not_retried():

@@ -13,6 +13,7 @@ class Block(BaseModel):
     text: str
     bbox: BBox  # normalized to 0-1 relative to page size
     is_title: bool = False
+    kind: Literal["text", "figure"] = "text"  # A figure's text is its generated caption.
 
 
 class Page(BaseModel):
@@ -20,6 +21,8 @@ class Page(BaseModel):
     title: str
     blocks: list[Block]
     low_text: bool = False
+    width: float = 960  # In PDF points.
+    height: float = 540
 
 
 class PdfExtraction(BaseModel):
@@ -53,3 +56,80 @@ class Alignment(BaseModel):
 
 
 NoteType = Literal["explanation", "example", "emphasis", "exam_hint", "question"]
+
+
+class Span(BaseModel):
+    """Consecutive windows aligned to one page."""
+
+    page: int
+    start: float
+    end: float
+    transcript: str
+
+
+class Note(BaseModel):
+    page: int
+    block_ids: list[str]  # Empty means a page-level note.
+    type: NoteType
+    note: str
+    quote: str
+    language: str
+    importance: int
+    start: float
+    end: float
+
+
+Point = tuple[float, float]
+
+
+class Sketch(BaseModel):
+    """How to draw a note by hand. Both the viewer and annotated.pdf draw exactly this.
+
+    Coordinates are in PDF points. The page spans x from 0 to its width, and the writable
+    gutters extend past it on both sides.
+    """
+
+    mark: Literal["underline", "circle", "bracket", "none"]
+    strokes: list[list[Point]]  # The mark on the slide.
+    arrow: list[list[Point]]  # From the margin note to the mark. Empty for page-level notes.
+    side: Literal["left", "right"]
+    x: float  # Top left of the margin note.
+    y: float
+    width: float
+    height: float
+    font_size: float
+    line_height: float
+    lines: list[str]  # Already wrapped, so both renderers break lines identically.
+
+
+class Annotation(BaseModel):
+    id: str
+    block_ids: list[str]
+    bboxes: list[BBox]
+    type: NoteType
+    note: str
+    language: str
+    start: float
+    end: float
+    sketch: Sketch
+
+
+class PageAnnotations(BaseModel):
+    page: int
+    width: float
+    height: float
+    gutter: float
+    notes: list[Annotation]
+
+
+class Annotations(BaseModel):
+    job_id: str
+    pages: list[PageAnnotations]
+    incomplete: bool = False  # The LLM's quota ran out, so some slides have no notes yet.
+
+
+class JobStatus(BaseModel):
+    status: Literal[
+        "queued", "extracting_pdf", "transcribing", "aligning", "writing_notes", "done", "error"
+    ]
+    error: str | None = None

@@ -36,7 +36,7 @@ def get_settings() -> Settings:
         llm_provider=os.environ.get("LLM_PROVIDER", "gemini"),
         llm_model=_optional("LLM_MODEL"),
         stt_provider=os.environ.get("STT_PROVIDER", "faster-whisper"),
-        stt_model=os.environ.get("STT_MODEL", "small"),
+        stt_model=os.environ.get("STT_MODEL", "large-v3-turbo"),
         stt_device=os.environ.get("STT_DEVICE", "cpu"),
         stt_compute_type=os.environ.get("STT_COMPUTE_TYPE", "int8"),
         stt_language=_optional("STT_LANGUAGE"),

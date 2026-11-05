@@ -1,3 +1,5 @@
+from base64 import b64encode
+
 from openai import OpenAI
 
 from app.llm.base import LLMProvider, with_backoff
@@ -23,6 +25,21 @@ class OpenAIProvider(LLMProvider):
                     {"role": "user", "content": prompt},
                 ],
                 response_format={"type": "json_object"},
+            )
+        )
+        return response.choices[0].message.content or ""
+
+    def describe_images(self, prompt: str, images: list[bytes]) -> str:
+        content = [{"type": "text", "text": prompt}] + [
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{b64encode(image).decode()}"},
+            }
+            for image in images
+        ]
+        response = with_backoff(
+            lambda: self._client.chat.completions.create(
+                model=self.model, messages=[{"role": "user", "content": content}]
             )
         )
         return response.choices[0].message.content or ""

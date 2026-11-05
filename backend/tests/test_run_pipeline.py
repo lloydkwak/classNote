@@ -17,7 +17,7 @@ def job_id(tmp_path):
 def test_runs_from_pdf_and_mock_transcript_to_alignment(job_id):
     statuses = []
     pipeline.run_pipeline(job_id, on_status=statuses.append)
-    assert statuses[:2] == ["extracting_pdf", "transcribing"]
+    assert list(dict.fromkeys(statuses))[:2] == ["extracting_pdf", "transcribing"]
 
     folder = pipeline.job_dir(job_id)
     for name in ["extraction.json", "segments.json", "windows.json", "alignment.json"]:
@@ -56,6 +56,6 @@ def test_from_step_reuses_earlier_outputs(job_id, monkeypatch):
     monkeypatch.setattr(pipeline, "extract_pdf", fail)
     monkeypatch.setattr(pipeline, "transcribe", fail)
     statuses = []
-    pipeline.run_pipeline(job_id, from_step="align", on_status=statuses.append)
+    pipeline.run_pipeline(job_id, from_step="align", to_step="align", on_status=statuses.append)
     assert statuses == ["aligning"]
     assert len(pipeline.read_alignment(job_id).windows) == 1
