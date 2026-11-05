@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
+import { DebugScreen } from './DebugScreen'
 import { UploadScreen } from './UploadScreen'
 import { ViewerScreen } from './ViewerScreen'
 import './App.css'
 
-/** The route is `#/jobs/<id>`, so a finished job can be reopened or bookmarked. */
-function jobIdFromHash(): string | null {
-  return window.location.hash.match(/^#\/jobs\/([\w-]+)/)?.[1] ?? null
+/** Routes are `#/jobs/<id>` and `#/jobs/<id>/debug`, so a job can be reopened or bookmarked. */
+function routeFromHash() {
+  const match = window.location.hash.match(/^#\/jobs\/([\w-]+)(\/debug)?/)
+  return { jobId: match?.[1] ?? null, debug: Boolean(match?.[2]) }
 }
 
 export default function App() {
-  const [jobId, setJobId] = useState(jobIdFromHash)
+  const [{ jobId, debug }, setRoute] = useState(routeFromHash)
 
   useEffect(() => {
-    const onHashChange = () => setJobId(jobIdFromHash())
+    const onHashChange = () => setRoute(routeFromHash())
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
@@ -21,6 +23,7 @@ export default function App() {
     window.location.hash = `#/jobs/${id}`
   }, [])
 
+  if (jobId && debug) return <DebugScreen key={jobId} jobId={jobId} />
   if (jobId) return <ViewerScreen key={jobId} jobId={jobId} />
   return <UploadScreen onDone={onDone} />
 }

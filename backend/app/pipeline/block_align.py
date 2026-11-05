@@ -65,7 +65,7 @@ class LLMNote(BaseModel):
     importance: int = 1
 
 
-def build_spans(alignment: Alignment) -> list[Span]:
+def build_spans(alignment: Alignment, max_seconds: float = MAX_SPAN_SECONDS) -> list[Span]:
     """Join consecutive windows on the same page. Off-topic windows make no span."""
     spans: list[Span] = []
     previous_page = None
@@ -77,7 +77,7 @@ def build_spans(alignment: Alignment) -> list[Span]:
         if (
             last is not None
             and window.page == previous_page
-            and window.end - last.start <= MAX_SPAN_SECONDS
+            and window.end - last.start <= max_seconds
         ):
             last.end = window.end
             last.transcript = f"{last.transcript} {window.text}"

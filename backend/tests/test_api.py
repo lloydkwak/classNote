@@ -139,7 +139,7 @@ def test_after_a_restart_finished_and_interrupted_jobs_are_reported(client, fini
     jobs._live_statuses.clear()
     body = client.get(f"/api/jobs/{finished_job}").json()
     assert body["status"] == "error"
-    assert "restarted" in body["error"]
+    assert "서버가 다시 시작" in body["error"]
 
 
 def test_cli_job_without_a_status_file_reports_done(client, pdf_bytes, tmp_path):

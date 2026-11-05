@@ -35,6 +35,26 @@ def test_korean_is_stored_as_readable_json(job_id):
     assert "base case가" in text
 
 
+def test_annotations_are_replaced_whole_even_if_the_file_is_busy(tmp_path, monkeypatch):
+    path = tmp_path / "annotations.json"
+    path.write_text("old", encoding="utf-8")
+    real_replace = type(path).replace
+    calls = []
+
+    def busy_once(self, target):
+        calls.append(1)
+        if len(calls) == 1:
+            raise PermissionError("in use")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(type(path), "replace", busy_once)
+    monkeypatch.setattr(pipeline, "REPLACE_RETRY_SECONDS", 0)
+    pipeline._write_atomically(path, "new")
+    assert path.read_text(encoding="utf-8") == "new"
+    assert len(calls) == 2
+    assert not path.with_suffix(".tmp").exists()
+
+
 def test_to_step_stops_early(job_id):
     pipeline.run_pipeline(job_id, to_step="extract")
     folder = pipeline.job_dir(job_id)

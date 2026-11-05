@@ -25,7 +25,7 @@ from app.pipeline.figure_caption import caption_figures
 from app.pipeline.page_align import align_windows, get_embedder, page_text
 from app.pipeline.stt import build_prompt as build_stt_prompt
 from app.pipeline.stt import get_stt_provider
-from app.pipeline.windowing import build_windows
+from app.pipeline.windowing import DEFAULT_WINDOW_SECONDS, build_windows
 
 log = logging.getLogger(__name__)
 
@@ -38,9 +38,12 @@ TIMINGS_NAME = "live_timings.json"
 CUT_OFF_SECONDS = 1.0
 # Whisper sometimes returns one huge segment. Redoing it would double the work, so keep it.
 MAX_HELD_BACK_SECONDS = 15.0
+# A span gets notes once it closes, so a long stay on one slide must not delay them for long.
+MAX_SPAN_SECONDS = 90.0
 MIN_AUDIO_SECONDS = 0.2  # Less than this isn't worth transcribing.
-# The DP may still change its mind about this many of the latest closed windows.
-UNFROZEN_WINDOWS = 2
+# The DP may still change its mind about this many of the latest closed windows. More would
+# give it hindsight, but each one delays the notes on screen by about a window's length.
+UNFROZEN_WINDOWS = 1
 
 StatusCallback = Callable[..., None]
 
@@ -53,7 +56,7 @@ def decode_to_wav(recording: Path, output: Path) -> None:
     ]  # fmt: skip
     result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
-        raise FfmpegError(f"ffmpeg failed: {result.stderr.strip()}")
+        raise FfmpegError(f"ffmpeg 실행 실패: {result.stderr.strip()}")
 
 
 def _wav_duration(path: Path) -> float:
@@ -151,7 +154,12 @@ class LiveSession:
         return new, duration
 
     def _commit_segments(self, new: list[Segment], duration: float, final: bool) -> None:
-        if (
+        if not self._stt.needs_audio:
+            # The mock's lines don't line up with chunks, and a line that's still in progress
+            # must stay available for the next chunk.
+            if new:
+                self._committed = new[-1].end
+        elif (
             not final
             and new
             and new[-1].end >= duration - CUT_OFF_SECONDS
@@ -165,8 +173,12 @@ class LiveSession:
 
     def _align(self, final: bool) -> Alignment:
         windows = build_windows(self._segments)
-        # The last window is still filling up, until the talk ends.
-        closed = windows if final else windows[:-1]
+        # A window that's still filling up could change, until the talk ends.
+        closed = (
+            windows
+            if final
+            else [w for w in windows if w.end - w.start >= DEFAULT_WINDOW_SECONDS]
+        )
         extraction = pipeline._read_extraction(self.folder)
         alignment = align_windows(
             closed, extraction, self._embedder, frozen_pages=self._frozen_pages
@@ -201,7 +213,7 @@ class LiveSession:
 
     def _update_notes(self, alignment: Alignment, final: bool) -> None:
         frozen: list[AlignedWindow] = alignment.windows[: len(self._frozen_pages)]
-        spans = build_spans(Alignment(windows=frozen, pages=alignment.pages))
+        spans = build_spans(Alignment(windows=frozen, pages=alignment.pages), MAX_SPAN_SECONDS)
         if not final:
             spans = spans[:-1]  # The last span may still grow.
         extraction = pipeline._read_extraction(self.folder)
@@ -236,7 +248,7 @@ class LiveSession:
     def _process(self, final: bool) -> None:
         recording = self.folder / RECORDING_NAME
         if not recording.exists():
-            raise ValueError("Nothing was recorded.")
+            raise ValueError("녹음된 내용이 없습니다.")
         timing: dict = {"final": final}
         clock = time.monotonic()
 

@@ -208,7 +208,7 @@ button:disabled {
 
 .viewer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 300px;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   grid-template-areas:
     'toolbar toolbar'
@@ -218,6 +218,15 @@ button:disabled {
   height: 100dvh;
 }
 
+.viewer.notes-hidden {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'toolbar'
+    'banner'
+    'slide'
+    'player';
+}
+
 .toolbar {
   grid-area: toolbar;
   display: flex;
@@ -225,9 +234,24 @@ button:disabled {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 8px 16px;
+  padding: 4px 12px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 14px;
 }
 
 .brand {
@@ -254,14 +278,21 @@ button:disabled {
 
 .slide-pane {
   grid-area: slide;
-  overflow: auto;
-  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 6px;
   background: var(--canvas);
 }
 
+/* The sheet sizes itself from this box, to fill as much of it as the slide's shape allows. */
 .stage {
-  max-width: 1100px;
-  margin: 0 auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .page-frame {
@@ -278,6 +309,7 @@ button:disabled {
 /* The sheet is white in both themes: it's paper, with the slide in the middle. */
 .sheet {
   position: relative;
+  flex: none;
   background: #fff;
   box-shadow: 0 1px 6px rgb(0 0 0 / 0.25);
 }
@@ -338,6 +370,11 @@ button:disabled {
   stroke-width: 2.6;
 }
 
+/* While following, other notes step back so the active one stands out. */
+.sheet.has-active .ink-note:not(.playing) {
+  opacity: 0.35;
+}
+
 .ink-note.playing .mark {
   stroke-width: 3;
 }
@@ -351,20 +388,94 @@ button:disabled {
   fill: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
+/* A note writing itself: the mark, then the arrow, then the text line by line. */
+.ink-note.writing .mark,
+.ink-note.writing .arrow {
+  stroke-dasharray: 1;
+  animation: draw-stroke var(--mark-seconds) ease-out var(--mark-delay) both;
+}
+
+.ink-note.writing .arrow {
+  animation-duration: var(--arrow-seconds);
+  animation-delay: var(--arrow-delay);
+}
+
+.ink-note.writing text {
+  animation: write-line var(--line-seconds) linear both;
+}
+
+@keyframes draw-stroke {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes write-line {
+  from {
+    clip-path: inset(-20% 100% -20% 0);
+  }
+
+  to {
+    clip-path: inset(-20% 0 -20% 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ink-note.writing .mark,
+  .ink-note.writing .arrow,
+  .ink-note.writing text {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
 .page-dots {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  justify-content: center;
-  max-width: 1100px;
-  margin: 12px auto 0;
+  flex: none;
+  gap: 3px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+  /* Centered when the buttons fit, and scrollable from the start when they don't. */
+  justify-content: safe center;
 }
 
 .page-dots button {
-  min-width: 32px;
-  padding: 2px 6px;
+  flex: none;
+  min-width: 30px;
+  padding: 1px 5px;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+.page-dots button {
+  position: relative;
+  color: var(--muted);
+}
+
+/* A dot, not only a color, so pages with notes stand out in any theme. */
+.page-dots .has-notes {
+  color: var(--text);
+  font-weight: 600;
+  border-color: var(--accent);
+}
+
+.page-dots .has-notes::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.page-dots .current.has-notes::after {
+  background: var(--on-accent);
 }
 
 .page-dots .current {
@@ -490,7 +601,7 @@ button:disabled {
 
 .player {
   grid-area: player;
-  padding: 8px 16px;
+  padding: 4px 12px;
   background: var(--surface);
   border-top: 1px solid var(--border);
 }
@@ -498,11 +609,299 @@ button:disabled {
 .player audio {
   display: block;
   width: 100%;
-  height: 40px;
+  height: 36px;
 }
 
 .player p {
   margin: 0;
+}
+
+/* Presentation mode */
+
+.present {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #111;
+}
+
+.present .stage {
+  flex: 1;
+}
+
+.present .sheet {
+  box-shadow: none;
+}
+
+.present .page-frame {
+  outline: 0;
+}
+
+.present-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px;
+  font-size: 14px;
+  color: #e8eaed;
+  background: #1d2024;
+}
+
+.present-bar button {
+  color: #e8eaed;
+  background: #2a2e33;
+  border-color: #4a4f55;
+  padding: 2px 10px;
+}
+
+.present-bar .primary {
+  color: #101317;
+  background: #7ea3f5;
+  border-color: #7ea3f5;
+}
+
+.present-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #a0a6ad;
+}
+
+.present-page {
+  font-variant-numeric: tabular-nums;
+}
+
+.present-notice {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  gap: 6px;
+}
+
+.present-notice button {
+  color: #fff;
+  background: rgb(36 86 199 / 0.92);
+  border-color: transparent;
+  padding: 4px 12px;
+}
+
+/* Debug screen */
+
+.debug {
+  --series-dp: #2a78d6;
+  --series-raw: #eb6834;
+  --band: #e4e5e3;
+  --grid: #e1e0d9;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .debug {
+    --series-dp: #3987e5;
+    --series-raw: #d95926;
+    --band: #2c2c2a;
+    --grid: #33332f;
+  }
+}
+
+.debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.debug h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.stat-row {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 16px 0;
+  padding: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.stat-row strong {
+  display: block;
+  font-size: 22px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 14px;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  display: inline-block;
+}
+
+.swatch-line {
+  width: 18px;
+  height: 2px;
+  background: var(--series-dp);
+}
+
+.swatch-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--series-raw);
+}
+
+.swatch-band {
+  width: 14px;
+  height: 14px;
+  background: var(--band);
+}
+
+.chart {
+  position: relative;
+  padding: 8px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.chart svg {
+  display: block;
+}
+
+.chart .grid {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+
+.chart .tick {
+  fill: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart .direct-label {
+  fill: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.off-topic-band {
+  fill: var(--band);
+}
+
+.dp-line {
+  fill: none;
+  stroke: var(--series-dp);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.raw-dot {
+  fill: var(--series-raw);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.raw-dot.hovered {
+  r: 6px;
+}
+
+.crosshair {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.chart-tooltip {
+  position: absolute;
+  top: 16px;
+  width: 268px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.18);
+  pointer-events: none;
+}
+
+.chart-tooltip dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  margin: 4px 0;
+}
+
+.chart-tooltip dt {
+  color: var(--muted);
+}
+
+.chart-tooltip dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-tooltip p {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.data-table {
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+.data-table summary {
+  cursor: pointer;
+}
+
+.data-table table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.present-choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
 }
 
 @media (max-width: 800px) {
@@ -514,6 +913,10 @@ button:disabled {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto minmax(0, 1.2fr) minmax(0, 1fr) auto;
     grid-template-areas: 'toolbar' 'banner' 'slide' 'notes' 'player';
+  }
+
+  .viewer.notes-hidden {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
   }
 
   .notes-pane {

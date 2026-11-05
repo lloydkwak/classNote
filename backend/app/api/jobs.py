@@ -34,7 +34,7 @@ def _folder(job_id: str) -> Path:
     """Return a job's folder. The id pattern keeps paths inside the jobs directory."""
     folder = pipeline.job_dir(job_id) if JOB_ID.match(job_id) else None
     if folder is None or not folder.is_dir():
-        raise HTTPException(404, "Job not found.")
+        raise HTTPException(404, "작업을 찾을 수 없습니다.")
     return folder
 
 
@@ -58,7 +58,7 @@ def _run_job(job_id: str) -> None:
 
 def _check_stt_model(stt_model: str | None) -> None:
     if stt_model and stt_model not in FASTER_WHISPER_MODELS:
-        raise HTTPException(400, f"Unknown speech model: {stt_model}")
+        raise HTTPException(400, f"알 수 없는 음성 인식 모델입니다: {stt_model}")
 
 
 def _save_upload(upload: UploadFile, directory: Path, default_suffix: str) -> Path:
@@ -76,9 +76,9 @@ def create_job(
 ) -> dict[str, str]:
     _check_stt_model(stt_model)
     if Path(pdf.filename or "").suffix.lower() != ".pdf":
-        raise HTTPException(400, "The slides must be a PDF file.")
+        raise HTTPException(400, "슬라이드는 PDF 파일이어야 합니다.")
     if audio is None and get_settings().stt_provider != "mock":
-        raise HTTPException(400, "An audio file is required.")
+        raise HTTPException(400, "오디오 파일이 필요합니다.")
     with tempfile.TemporaryDirectory() as directory:
         temporary = Path(directory)
         pdf_path = _save_upload(pdf, temporary, ".pdf")
@@ -102,7 +102,7 @@ def create_live_job(pdf: UploadFile, stt_model: str | None = Form(None)) -> dict
     """Start preparing for a talk. Audio then arrives through the chunks endpoint."""
     _check_stt_model(stt_model)
     if Path(pdf.filename or "").suffix.lower() != ".pdf":
-        raise HTTPException(400, "The slides must be a PDF file.")
+        raise HTTPException(400, "슬라이드는 PDF 파일이어야 합니다.")
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = _save_upload(pdf, Path(directory), ".pdf")
         job_id = pipeline.create_job(pdf_path, None, stt_model=stt_model)
@@ -122,7 +122,7 @@ def _session(job_id: str) -> LiveSession:
     _folder(job_id)
     session = _sessions.get(job_id)
     if session is None:
-        raise HTTPException(409, "This job isn't taking live audio.")
+        raise HTTPException(409, "이 작업은 실시간 녹음을 받지 않습니다.")
     return session
 
 
@@ -133,7 +133,7 @@ def add_chunk(job_id: str, index: int = Form(...), chunk: UploadFile = Form(...)
     if index < session.chunks_received:  # A retry of a part that already arrived.
         return {"chunks_received": session.chunks_received}
     if index > session.chunks_received:
-        raise HTTPException(409, f"Expected chunk {session.chunks_received}, got {index}.")
+        raise HTTPException(409, f"{session.chunks_received}번 구간을 기다리고 있었는데 {index}번이 왔습니다.")
     session.add_audio(chunk.file.read())
     _executor.submit(session.process)
     return {"chunks_received": session.chunks_received}
@@ -158,7 +158,7 @@ def get_status(job_id: str) -> JobStatus:
         if saved.status in ("done", "error"):
             return saved
         # The server restarted while this job was running, and nothing will resume it.
-        return JobStatus(status="error", error="The server restarted during this job.")
+        return JobStatus(status="error", error="작업 중에 서버가 다시 시작되었습니다.")
     # Jobs made with the CLI have no status file, so report what they produced.
     done = (folder / pipeline.ANNOTATIONS_NAME).exists()
     return JobStatus(status="done" if done else "queued")
@@ -174,19 +174,19 @@ def _serve(job_id: str, name: str, media_type: str, not_ready: str) -> FileRespo
 @router.get("/{job_id}/annotations")
 def get_annotations(job_id: str) -> FileResponse:
     return _serve(
-        job_id, pipeline.ANNOTATIONS_NAME, "application/json", "Annotations aren't ready yet."
+        job_id, pipeline.ANNOTATIONS_NAME, "application/json", "노트가 아직 준비되지 않았습니다."
     )
 
 
 @router.get("/{job_id}/pdf")
 def get_pdf(job_id: str) -> FileResponse:
-    return _serve(job_id, pipeline.PDF_NAME, "application/pdf", "PDF not found.")
+    return _serve(job_id, pipeline.PDF_NAME, "application/pdf", "PDF를 찾을 수 없습니다.")
 
 
 @router.get("/{job_id}/audio")
 def get_audio(job_id: str) -> FileResponse:
     """FileResponse answers HTTP Range requests, which seeking in the player needs."""
-    return _serve(job_id, pipeline.AUDIO_NAME, "audio/mpeg", "This job has no audio.")
+    return _serve(job_id, pipeline.AUDIO_NAME, "audio/mpeg", "이 작업에는 오디오가 없습니다.")
 
 
 @router.get("/{job_id}/annotated.pdf")
@@ -195,11 +195,11 @@ def get_annotated_pdf(job_id: str) -> FileResponse:
     folder = _folder(job_id)
     if not (folder / EXPORT_NAME).exists() and (folder / pipeline.ANNOTATIONS_NAME).exists():
         pipeline.export_job(job_id)
-    return _serve(job_id, EXPORT_NAME, "application/pdf", "The annotated PDF isn't ready yet.")
+    return _serve(job_id, EXPORT_NAME, "application/pdf", "annotated.pdf가 아직 준비되지 않았습니다.")
 
 
 @router.get("/{job_id}/debug")
 def get_debug(job_id: str) -> FileResponse:
     return _serve(
-        job_id, pipeline.ALIGNMENT_NAME, "application/json", "The alignment isn't ready yet."
+        job_id, pipeline.ALIGNMENT_NAME, "application/json", "정렬 결과가 아직 준비되지 않았습니다."
     )
