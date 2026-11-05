@@ -10,10 +10,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from app.config import get_settings
-from app.models import Alignment, Note, PdfExtraction, Segment, Window
+from app.models import Alignment, Annotations, Note, PdfExtraction, Segment, Window
 from app.pipeline.audio import convert_to_mp3
 from app.pipeline.block_align import generate_notes
 from app.pipeline.consolidate import consolidate
+from app.pipeline.export_pdf import EXPORT_NAME, export_annotated_pdf
 from app.pipeline.page_align import align_windows
 from app.pipeline.pdf_extract import extract_pdf
 from app.pipeline.stt import transcribe
@@ -102,6 +103,13 @@ def _step_consolidate(folder: Path) -> None:
     )
 
 
+def _step_export(folder: Path) -> None:
+    annotations = Annotations.model_validate_json(
+        (folder / ANNOTATIONS_NAME).read_text(encoding="utf-8")
+    )
+    export_annotated_pdf(folder / PDF_NAME, annotations, folder / EXPORT_NAME)
+
+
 # (step name, status shown to the user, function), in run order.
 STEPS: list[tuple[str, str, Callable[[Path], None]]] = [
     ("extract", "extracting_pdf", _step_extract),
@@ -110,6 +118,7 @@ STEPS: list[tuple[str, str, Callable[[Path], None]]] = [
     ("align", "aligning", _step_align),
     ("notes", "writing_notes", _step_notes),
     ("consolidate", "writing_notes", _step_consolidate),
+    ("export", "writing_notes", _step_export),
 ]
 STEP_NAMES = [name for name, _, _ in STEPS]
 
