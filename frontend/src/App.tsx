@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { UploadScreen } from './UploadScreen'
 import { ViewerScreen } from './ViewerScreen'
 import './App.css'
@@ -17,6 +17,10 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  const onDone = useCallback((id: string) => {
+    window.location.hash = `#/jobs/${id}`
+  }, [])
+
   if (jobId) return <ViewerScreen key={jobId} jobId={jobId} />
-  return <UploadScreen onDone={(id) => (window.location.hash = `#/jobs/${id}`)} />
+  return <UploadScreen onDone={onDone} />
 }

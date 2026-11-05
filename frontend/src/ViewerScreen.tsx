@@ -60,7 +60,11 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
 
   useEffect(() => {
     getAnnotations(jobId)
-      .then(setAnnotations)
+      .then((loaded) => {
+        setAnnotations(loaded)
+        // Open where the notes are, not on a title slide that may have none.
+        if (loaded.pages.length > 0) setPage(loaded.pages[0].page)
+      })
       .catch((cause) => setError(cause.message))
   }, [jobId])
 

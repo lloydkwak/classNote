@@ -49,12 +49,18 @@ export type JobState =
   | 'transcribing'
   | 'aligning'
   | 'writing_notes'
+  | 'preparing'
+  | 'ready'
+  | 'recording'
   | 'done'
   | 'error'
 
 export interface JobStatus {
   status: JobState
   error: string | null
+  chunks_received: number
+  chunks_processed: number
+  note_count: number
 }
 
 export const pdfUrl = (jobId: string) => `/api/jobs/${jobId}/pdf`
@@ -77,14 +83,37 @@ async function getJson<T>(url: string): Promise<T> {
   return response.json()
 }
 
-export async function createJob(pdf: File, audio: File): Promise<string> {
+async function postForm(url: string, form?: FormData) {
+  const response = await fetch(url, { method: 'POST', body: form })
+  if (!response.ok) throw new Error(await errorMessage(response))
+  return response.json()
+}
+
+function jobForm(pdf: File, speechModel: string) {
   const form = new FormData()
   form.append('pdf', pdf)
-  form.append('audio', audio)
-  const response = await fetch('/api/jobs', { method: 'POST', body: form })
-  if (!response.ok) throw new Error(await errorMessage(response))
-  return (await response.json()).job_id
+  if (speechModel) form.append('stt_model', speechModel)
+  return form
 }
+
+export async function createJob(pdf: File, audio: File, speechModel = ''): Promise<string> {
+  const form = jobForm(pdf, speechModel)
+  form.append('audio', audio)
+  return (await postForm('/api/jobs', form)).job_id
+}
+
+export async function createLiveJob(pdf: File, speechModel = ''): Promise<string> {
+  return (await postForm('/api/jobs/live', jobForm(pdf, speechModel))).job_id
+}
+
+export async function sendChunk(jobId: string, index: number, chunk: Blob) {
+  const form = new FormData()
+  form.append('index', String(index))
+  form.append('chunk', chunk, 'chunk.webm')
+  return postForm(`/api/jobs/${jobId}/chunks`, form)
+}
+
+export const finishLiveJob = (jobId: string) => postForm(`/api/jobs/${jobId}/finish`)
 
 export const getStatus = (jobId: string) => getJson<JobStatus>(`/api/jobs/${jobId}`)
 export const getAnnotations = (jobId: string) =>

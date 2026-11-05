@@ -1,5 +1,7 @@
 import pytest
 
+from app.pipeline import page_align, stt
+
 
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
@@ -13,3 +15,6 @@ def isolated_settings(tmp_path, monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # Loaded models are kept between calls, and tests replace them with fakes.
+    stt._load_whisper.cache_clear()
+    page_align._load_e5.cache_clear()

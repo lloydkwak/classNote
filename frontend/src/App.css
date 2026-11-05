@@ -100,11 +100,35 @@ button:disabled {
   opacity: 0;
 }
 
+.model-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.model-choice select {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+.live-status {
+  margin: 0 0 20px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .recorder {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 8px;
 }
 
 .recording-dot {

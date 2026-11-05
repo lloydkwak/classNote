@@ -116,6 +116,45 @@ def test_page_that_attracts_every_window_does_not_win_everything():
     assert pages_of(align_similarities(matrix, CONFIG)) == true_pages
 
 
+def test_frozen_windows_stay_as_decided_even_against_the_evidence():
+    matrix = matrix_for([0, 0, 2, 2], 3)
+    decisions = align_similarities(matrix, CONFIG, frozen=[1, 1])
+    assert pages_of(decisions) == [1, 1, 2, 2]
+
+
+def test_windows_after_frozen_ones_pay_to_move_away_from_the_last_page():
+    """Barely preferring page 0 isn't worth going back from frozen page 3."""
+    matrix = np.array([[0.8, 0.8, 0.8, 0.85], [0.8, 0.8, 0.8, 0.85], [0.83, 0.8, 0.8, 0.82]])
+    assert pages_of(align_similarities(matrix, CONFIG, frozen=[3, 3]))[2:] == [3]
+    # With nothing frozen, that window starts wherever it scores best.
+    assert pages_of(align_similarities(matrix[2:], CONFIG)) == [0]
+
+
+def test_a_frozen_off_topic_window_stays_off_topic_and_is_skipped_over():
+    matrix = matrix_for([1, 1, 1, 2], 3)
+    decisions = align_similarities(matrix, CONFIG, frozen=[1, None])
+    assert pages_of(decisions) == [1, None, 1, 2]
+
+
+def test_e5_remembers_what_it_already_embedded():
+    from app.pipeline.page_align import E5Embedder
+
+    seen = []
+
+    class FakeModel:
+        def encode(self, texts, **_):
+            seen.append(list(texts))
+            return np.ones((len(texts), 2))
+
+    embedder = E5Embedder.__new__(E5Embedder)
+    embedder._model = FakeModel()
+    embedder._remembered = {}
+    embedder.embed_passages(["a", "b"])
+    result = embedder.embed_passages(["b", "c", "a"])
+    assert seen == [["passage: a", "passage: b"], ["passage: c"]]
+    assert result.shape == (3, 2)
+
+
 def test_normalize_rows_handles_a_flat_row():
     assert normalize_rows(np.array([[0.5, 0.5]])).tolist() == [[0.0, 0.0]]
 
@@ -196,6 +235,7 @@ def test_e5_prefixes_are_used():
 
     embedder = E5Embedder.__new__(E5Embedder)
     embedder._model = FakeModel()
+    embedder._remembered = {}
     embedder.embed_queries(["q"])
     embedder.embed_passages(["p"])
     assert seen == ["query: q", "passage: p"]

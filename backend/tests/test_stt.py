@@ -22,7 +22,7 @@ class CountingProvider(stt.STTProvider):
 @pytest.fixture
 def provider(monkeypatch):
     counting = CountingProvider()
-    monkeypatch.setattr(stt, "get_stt_provider", lambda: counting)
+    monkeypatch.setattr(stt, "get_stt_provider", lambda model=None: counting)
     return counting
 
 
@@ -101,6 +101,31 @@ def test_faster_whisper_language_override(monkeypatch, tmp_path):
     stt.FasterWhisperProvider("small", "cpu", "int8").transcribe(tmp_path / "a.mp3", "", "ko")
     assert captured["language"] == "ko"
     assert captured["multilingual"] is False
+
+
+def test_a_job_can_choose_its_own_model(monkeypatch):
+    monkeypatch.setenv("STT_PROVIDER", "faster-whisper")
+    monkeypatch.setenv("STT_MODEL", "small")
+    assert stt.get_stt_provider().model == "small"
+    assert stt.get_stt_provider("base").model == "base"
+
+
+def test_the_model_stays_loaded_between_calls(monkeypatch, tmp_path):
+    loads = []
+
+    class FakeWhisperModel:
+        def __init__(self, *args, **kwargs):
+            loads.append(args)
+
+        def transcribe(self, audio, **options):
+            return iter([]), None
+
+    monkeypatch.setattr("faster_whisper.WhisperModel", FakeWhisperModel)
+    provider = stt.FasterWhisperProvider("small", "cpu", "int8")
+    provider.prepare()
+    provider.transcribe(tmp_path / "a.mp3", "", None)
+    provider.transcribe(tmp_path / "b.mp3", "", None)
+    assert len(loads) == 1
 
 
 def test_openai_splits_large_files_and_corrects_timestamps(monkeypatch, tmp_path):

@@ -2,6 +2,7 @@
 
 import tempfile
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from pathlib import Path
 
 from app.cache import cached_json, hash_file
@@ -17,14 +18,29 @@ OPENAI_MAX_BYTES = 25 * 1024 * 1024
 OPENAI_CHUNK_SECONDS = 50 * 60  # About 12MB at the bitrate audio.py produces.
 
 
+# Sizes faster-whisper can download, for choosing a model per job.
+FASTER_WHISPER_MODELS = {"tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"}
+
+
 class STTProvider(ABC):
     name: str
     model: str
     needs_audio: bool = True
 
+    def prepare(self) -> None:
+        """Do slow setup now, such as loading a model."""
+
     @abstractmethod
     def transcribe(self, audio: Path, prompt: str, language: str | None) -> list[Segment]:
         """Return timestamped segments. `language=None` means auto-detect."""
+
+
+@lru_cache(maxsize=1)
+def _load_whisper(model: str, device: str, compute_type: str):
+    """Keep the model loaded: reloading it costs seconds, on every chunk of a live talk."""
+    from faster_whisper import WhisperModel  # Slow import, so only when transcribing.
+
+    return WhisperModel(model, device=device, compute_type=compute_type)
 
 
 class FasterWhisperProvider(STTProvider):
@@ -35,10 +51,11 @@ class FasterWhisperProvider(STTProvider):
         self._device = device
         self._compute_type = compute_type
 
-    def transcribe(self, audio: Path, prompt: str, language: str | None) -> list[Segment]:
-        from faster_whisper import WhisperModel  # Slow import, so only when transcribing.
+    def prepare(self) -> None:
+        _load_whisper(self.model, self._device, self._compute_type)
 
-        whisper = WhisperModel(self.model, device=self._device, compute_type=self._compute_type)
+    def transcribe(self, audio: Path, prompt: str, language: str | None) -> list[Segment]:
+        whisper = _load_whisper(self.model, self._device, self._compute_type)
         segments, _ = whisper.transcribe(
             str(audio),
             initial_prompt=prompt or None,
@@ -106,12 +123,13 @@ class MockSTTProvider(STTProvider):
         return mock_transcript()
 
 
-def get_stt_provider() -> STTProvider:
+def get_stt_provider(model: str | None = None) -> STTProvider:
+    """`model` overrides `STT_MODEL` for one job."""
     settings = get_settings()
     name = settings.stt_provider
     if name == "faster-whisper":
         return FasterWhisperProvider(
-            settings.stt_model, settings.stt_device, settings.stt_compute_type
+            model or settings.stt_model, settings.stt_device, settings.stt_compute_type
         )
     if name == "openai":
         return OpenAIWhisperProvider()
@@ -131,10 +149,12 @@ def build_prompt(key_terms: list[str]) -> str:
     return prompt
 
 
-def transcribe(audio: Path | None, key_terms: list[str]) -> list[Segment]:
+def transcribe(
+    audio: Path | None, key_terms: list[str], model: str | None = None
+) -> list[Segment]:
     """Transcribe with the configured provider, using the cache when possible."""
     settings = get_settings()
-    provider = get_stt_provider()
+    provider = get_stt_provider(model)
     prompt = build_prompt(key_terms)
     if not provider.needs_audio:
         return provider.transcribe(audio, prompt, settings.stt_language)

@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.llm.base import MAX_RETRIES, QuotaExhausted, with_backoff
+from app.llm.base import LIVE_RETRY, MAX_RETRIES, QuotaExhausted, with_backoff
 
 
 class RateLimited(Exception):
@@ -95,6 +95,29 @@ def test_the_servers_short_delay_is_respected():
 
     assert with_backoff(call, sleep=waits.append) == "ok"
     assert waits[0] >= 30
+
+
+def test_live_policy_gives_up_fast_on_overload():
+    calls = []
+    waits = []
+
+    def call():
+        calls.append(1)
+        raise Overloaded()
+
+    with pytest.raises(Overloaded):
+        with_backoff(call, sleep=waits.append, policy=LIVE_RETRY)
+    assert len(calls) == 2
+    assert sum(waits) < 5
+
+
+def test_live_policy_treats_a_long_server_delay_as_a_limit():
+    class AskedToWait(Exception):
+        code = 429
+        details = {"error": {"details": [{"retryDelay": "30s"}]}}
+
+    with pytest.raises(QuotaExhausted):
+        with_backoff(lambda: (_ for _ in ()).throw(AskedToWait()), sleep=lambda _: None, policy=LIVE_RETRY)
 
 
 def test_other_errors_are_not_retried():

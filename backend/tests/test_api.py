@@ -35,7 +35,8 @@ def finished_job(client, pdf_bytes):
     response = client.post("/api/jobs", files={"pdf": ("slides.pdf", pdf_bytes)})
     assert response.status_code == 202
     job_id = response.json()["job_id"]
-    assert wait_until_finished(client, job_id) == {"status": "done", "error": None}
+    body = wait_until_finished(client, job_id)
+    assert (body["status"], body["error"]) == ("done", None)
     return job_id
 
 
@@ -80,7 +81,8 @@ def test_pipeline_failure_is_reported(client, pdf_bytes, monkeypatch):
 
     monkeypatch.setattr(jobs.pipeline, "run_pipeline", fail)
     job_id = client.post("/api/jobs", files={"pdf": ("slides.pdf", pdf_bytes)}).json()["job_id"]
-    assert wait_until_finished(client, job_id) == {"status": "error", "error": "Something broke"}
+    body = wait_until_finished(client, job_id)
+    assert (body["status"], body["error"]) == ("error", "Something broke")
 
 
 def test_audio_supports_range_requests_for_seeking(client, finished_job):
