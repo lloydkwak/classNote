@@ -107,6 +107,15 @@ def test_normalize_rows_gives_mean_zero_and_unit_variance():
     assert normalized.std(axis=1) == pytest.approx(1)
 
 
+def test_page_that_attracts_every_window_does_not_win_everything():
+    """Like one Korean slide in an English deck: high for all Korean speech."""
+    true_pages = [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2]
+    matrix = matrix_for(true_pages, 4, high=0.84, low=0.8)
+    matrix[:, 3] = 0.86  # Beats the true page in every window, so raw argmax is always 3.
+    assert {decision.raw_page_index for decision in align_similarities(matrix, CONFIG)} == {3}
+    assert pages_of(align_similarities(matrix, CONFIG)) == true_pages
+
+
 def test_normalize_rows_handles_a_flat_row():
     assert normalize_rows(np.array([[0.5, 0.5]])).tolist() == [[0.0, 0.0]]
 

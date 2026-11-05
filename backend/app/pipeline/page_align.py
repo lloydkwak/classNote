@@ -71,6 +71,18 @@ def normalize_rows(similarities: np.ndarray) -> np.ndarray:
     )
 
 
+def remove_page_bias(similarities: np.ndarray) -> np.ndarray:
+    """Subtract each page's mean over the lecture, when there are enough windows to tell.
+
+    Some pages score high for every window. For example, the only Korean text on an
+    English deck attracts all Korean speech because of the shared language, not the
+    topic. Per-window z-scores can't remove that, because it affects every row alike.
+    """
+    if similarities.shape[0] < MIN_WINDOWS_FOR_PAGE_BIAS:
+        return similarities
+    return similarities - similarities.mean(axis=0, keepdims=True)
+
+
 def off_topic_mask(similarities: np.ndarray, config: AlignConfig) -> np.ndarray:
     """Flag windows whose best page scores unusually low for this lecture.
 
@@ -129,7 +141,7 @@ def align_similarities(similarities: np.ndarray, config: AlignConfig) -> list[Wi
     """
     if similarities.shape[0] == 0 or similarities.shape[1] == 0:
         return [WindowDecision(None, 0, 0.0) for _ in range(similarities.shape[0])]
-    normalized = normalize_rows(similarities)
+    normalized = normalize_rows(remove_page_bias(similarities))
     on_topic = np.flatnonzero(~off_topic_mask(similarities, config))
     path = viterbi(normalized[on_topic], config)
     chosen = dict(zip(on_topic.tolist(), path))
