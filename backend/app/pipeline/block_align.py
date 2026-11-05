@@ -27,7 +27,6 @@ EMPHASIS = re.compile(
 PROMPT = """You annotate university lecture slides using what the professor said.
 
 Below are one slide's text blocks and the transcript of the professor explaining that slide.
-The transcript comes from speech recognition, so it may contain misheard words.
 
 Return a JSON array of notes. Each note has these fields:
 - "block_ids": the ids of the blocks it relates to, or [] if it relates to the whole page
@@ -51,7 +50,10 @@ Rules:
 - Blocks with "kind": "figure" are charts or images, and their "text" describes what they show.
   When the professor refers to a figure ("look at this graph", "이 그래프 보면") or explains what it
   shows, attach the note to that figure's block.
-- Skip garbled or meaningless parts of the transcript. Return [] if nothing is worth noting.
+- The transcript has speech recognition errors, and technical terms often come out as Hangul
+  spellings or wrong words. Work out what the professor meant from the context and the slide, and
+  write notes on everything you can follow. Skip only parts that make no sense even then, and
+  return [] only if nothing in the transcript can be understood.
 
 """
 
