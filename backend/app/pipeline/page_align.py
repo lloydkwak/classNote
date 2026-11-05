@@ -206,14 +206,14 @@ def get_embedder():
 
 
 def page_text(page: Page) -> str:
-    """Title plus body. The title block is also a body block, so it appears only once."""
-    return " ".join(block.text for block in page.blocks)
+    """Title, body, and figure captions. The title block is one of the blocks."""
+    return " ".join(block.text for block in page.blocks if block.text)
 
 
 def similarity_matrix(windows: list[Window], pages: list[Page], embedder) -> np.ndarray:
     """Cosine similarity, windows x pages. Pages with no text score 0 for every window."""
     matrix = np.zeros((len(windows), len(pages)))
-    with_text = [index for index, page in enumerate(pages) if page.blocks]
+    with_text = [index for index, page in enumerate(pages) if page_text(page)]
     if windows and with_text:
         queries = embedder.embed_queries([window.text for window in windows])
         passages = embedder.embed_passages([page_text(pages[index]) for index in with_text])

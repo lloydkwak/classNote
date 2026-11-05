@@ -36,6 +36,12 @@ function formatTime(seconds: number) {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
 }
 
+/** Each side of the page gets this share of its width to write in. Matches layout.py. */
+const GUTTER_RATIO = 0.24
+const SHEET_WIDTH_RATIO = 1 + 2 * GUTTER_RATIO
+
+const toPoints = (stroke: [number, number][]) => stroke.map(([x, y]) => `${x},${y}`).join(' ')
+
 function isPlaying(note: Annotation, time: number) {
   return time >= note.start && time < note.end
 }
@@ -66,10 +72,11 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
     return () => observer.disconnect()
   }, [])
 
-  const notes = useMemo(
-    () => annotations?.pages.find((item) => item.page === page)?.notes ?? [],
+  const pageAnnotations = useMemo(
+    () => annotations?.pages.find((item) => item.page === page),
     [annotations, page],
   )
+  const notes = pageAnnotations?.notes ?? []
 
   const annotatedPages = useMemo(
     () => new Set(annotations?.pages.map((item) => item.page)),
@@ -124,9 +131,22 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
         </a>
       </header>
 
+      {annotations?.incomplete && (
+        <p className="banner" role="status">
+          Some slides have no notes yet because the LLM's daily limit ran out. Upload the same files
+          again later to continue from here.
+        </p>
+      )}
+
       <section className="slide-pane">
         <div className="stage" ref={stageRef}>
-          <div className="page-frame">
+          <div className="sheet">
+          <div
+            className="page-frame"
+            style={{
+              marginInline: `${(GUTTER_RATIO / SHEET_WIDTH_RATIO) * 100}%`,
+            }}
+          >
             <Document
               file={pdfUrl(jobId)}
               options={PDF_OPTIONS}
@@ -137,7 +157,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
               {pageWidth > 0 && (
                 <Page
                   pageNumber={page}
-                  width={pageWidth}
+                  width={pageWidth / SHEET_WIDTH_RATIO}
                   renderAnnotationLayer={false}
                   loading={<p className="muted">Loading page…</p>}
                 />
@@ -147,9 +167,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
               note.bboxes.map(([x0, y0, x1, y1], index) => (
                 <button
                   key={`${note.id}-${index}`}
-                  className={`highlight type-${note.type}${
-                    selectedId === note.id ? ' selected' : ''
-                  }${isPlaying(note, time) ? ' playing' : ''}`}
+                  className="hit-area"
                   style={{
                     left: `${x0 * 100}%`,
                     top: `${y0 * 100}%`,
@@ -161,6 +179,55 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
                 />
               )),
             )}
+          </div>
+          {pageAnnotations && (
+            <svg
+              className="ink"
+              viewBox={`${-pageAnnotations.gutter} 0 ${
+                pageAnnotations.width + 2 * pageAnnotations.gutter
+              } ${pageAnnotations.height}`}
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              {notes.map((note) => {
+                const { sketch } = note
+                return (
+                  <g
+                    key={note.id}
+                    className={`ink-note type-${note.type}${
+                      selectedId === note.id ? ' selected' : ''
+                    }${isPlaying(note, time) ? ' playing' : ''}`}
+                    onClick={() => playNote(note)}
+                  >
+                    {sketch.strokes.map((stroke, index) => (
+                      <polyline key={index} className="mark" points={toPoints(stroke)} />
+                    ))}
+                    {sketch.arrow.map((stroke, index) => (
+                      <polyline key={index} className="arrow" points={toPoints(stroke)} />
+                    ))}
+                    <rect
+                      className="note-hit"
+                      x={sketch.x}
+                      y={sketch.y}
+                      width={sketch.width}
+                      height={sketch.height}
+                    />
+                    <text lang={note.language} fontSize={sketch.font_size}>
+                      {sketch.lines.map((line, index) => (
+                        <tspan
+                          key={index}
+                          x={sketch.x}
+                          y={sketch.y + index * sketch.line_height + sketch.font_size}
+                        >
+                          {line}
+                        </tspan>
+                      ))}
+                    </text>
+                  </g>
+                )
+              })}
+            </svg>
+          )}
           </div>
         </div>
         <nav className="page-dots" aria-label="Pages with notes">

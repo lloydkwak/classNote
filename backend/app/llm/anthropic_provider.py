@@ -1,3 +1,5 @@
+from base64 import b64encode
+
 from anthropic import Anthropic
 
 from app.llm.base import LLMProvider, with_backoff
@@ -20,6 +22,28 @@ class AnthropicProvider(LLMProvider):
                 max_tokens=MAX_TOKENS,
                 system="Reply with only valid JSON, with no prose or code fences.",
                 messages=[{"role": "user", "content": prompt}],
+            )
+        )
+        return "".join(block.text for block in response.content if block.type == "text")
+
+    def describe_images(self, prompt: str, images: list[bytes]) -> str:
+        content = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": b64encode(image).decode(),
+                },
+            }
+            for image in images
+        ] + [{"type": "text", "text": prompt}]
+        response = with_backoff(
+            lambda: self._client.messages.create(
+                model=self.model,
+                max_tokens=MAX_TOKENS,
+                system="Reply with only valid JSON, with no prose or code fences.",
+                messages=[{"role": "user", "content": content}],
             )
         )
         return "".join(block.text for block in response.content if block.type == "text")

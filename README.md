@@ -19,6 +19,10 @@ cd backend && uv run uvicorn app.main:app --reload   # http://127.0.0.1:8000
 cd frontend && npm run dev                           # http://localhost:5173
 ```
 
+## Credits
+
+Margin notes use [Nanum Pen Script](https://fonts.google.com/specimen/Nanum+Pen+Script), under the SIL Open Font License (`backend/assets/fonts/OFL.txt`).
+
 ## Test
 
 ```sh

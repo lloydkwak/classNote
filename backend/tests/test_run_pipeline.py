@@ -17,7 +17,7 @@ def job_id(tmp_path):
 def test_runs_from_pdf_and_mock_transcript_to_alignment(job_id):
     statuses = []
     pipeline.run_pipeline(job_id, on_status=statuses.append)
-    assert statuses[:2] == ["extracting_pdf", "transcribing"]
+    assert list(dict.fromkeys(statuses))[:2] == ["extracting_pdf", "transcribing"]
 
     folder = pipeline.job_dir(job_id)
     for name in ["extraction.json", "segments.json", "windows.json", "alignment.json"]:

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.cache import cached_json
 from app.llm import get_provider
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, QuotaExhausted
 from app.llm.mock import INPUT_MARKER
 from app.models import Alignment, Note, NoteType, Page, PdfExtraction, Span
 
@@ -47,6 +47,9 @@ Rules:
 - Do not invent anything. Every note must be supported by its quote.
 - "exam_hint_candidates" lists emphasis words found in the transcript. Use type "exam_hint" when
   the professor really is saying that something will be tested, and otherwise ignore them.
+- Blocks with "kind": "figure" are charts or images, and their "text" describes what they show.
+  When the professor refers to a figure ("look at this graph", "이 그래프 보면") or explains what it
+  shows, attach the note to that figure's block.
 - Skip garbled or meaningless parts of the transcript. Return [] if nothing is worth noting.
 
 """
@@ -105,7 +108,10 @@ def quote_in_transcript(quote: str, transcript: str) -> bool:
 
 def build_prompt(span: Span, page: Page) -> str:
     request = {
-        "blocks": [{"block_id": block.block_id, "text": block.text} for block in page.blocks],
+        "blocks": [
+            {"block_id": block.block_id, "kind": block.kind, "text": block.text}
+            for block in page.blocks
+        ],
         "transcript": span.transcript,
         "exam_hint_candidates": find_emphasis(span.transcript),
     }
@@ -168,11 +174,20 @@ def generate_span_notes(span: Span, page: Page, provider: LLMProvider) -> list[N
     return notes
 
 
-def generate_notes(alignment: Alignment, extraction: PdfExtraction) -> list[Note]:
-    """Make one LLM request at a time, which keeps free-tier use within its limits."""
+def generate_notes(alignment: Alignment, extraction: PdfExtraction) -> tuple[list[Note], bool]:
+    """Return the notes, and whether every span was covered.
+
+    Requests go one at a time, to stay within free-tier limits. Those limits can run out
+    partway through a lecture. The notes so far are still useful, and each finished span
+    is cached, so running again later continues from here.
+    """
     pages = {page.page: page for page in extraction.pages}
     provider = get_provider()
     notes: list[Note] = []
     for span in build_spans(alignment):
-        notes.extend(generate_span_notes(span, pages[span.page], provider))
-    return notes
+        try:
+            notes.extend(generate_span_notes(span, pages[span.page], provider))
+        except QuotaExhausted as error:
+            log.warning("Stopping notes at %.0fs: %s", span.start, error)
+            return notes, False
+    return notes, True

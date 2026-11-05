@@ -17,7 +17,7 @@ def all_text(page):
 
 
 def test_extracts_each_page_with_stable_block_ids(extraction):
-    assert [page.page for page in extraction.pages] == [1, 2, 3, 4, 5]
+    assert [page.page for page in extraction.pages] == list(range(1, len(SLIDES) + 1))
     first = extraction.pages[0]
     assert first.blocks[0].block_id == "p1_b0"
     assert all(block.page == 1 for block in first.blocks)

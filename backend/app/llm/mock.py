@@ -2,11 +2,15 @@
 
 import json
 import re
+import struct
 
 from app.llm.base import LLMProvider
 
 # Prompts that want notes place their input as JSON after this marker.
 INPUT_MARKER = "INPUT_JSON:"
+
+MOCK_CHART_CAPTION = "Bar chart comparing the running time of merge sort and naive recursion"
+MOCK_PHOTO_CAPTION = "Photo of a printed stack trace"
 
 HANGUL = re.compile(r"[가-힣]")
 LATIN = re.compile(r"[A-Za-z]")
@@ -39,9 +43,23 @@ def _note_for(sentence: str, blocks: list[dict], is_candidate: bool) -> dict:
     }
 
 
+def _png_aspect_ratio(png: bytes) -> float:
+    width, height = struct.unpack(">II", png[16:24])  # From the PNG header.
+    return width / height
+
+
 class MockProvider(LLMProvider):
     name = "mock"
     model = "mock"
+
+    def describe_images(self, prompt: str, images: list[bytes]) -> str:
+        """It can't see, so wide images are the sample chart and others the sample photo."""
+        return json.dumps(
+            [
+                MOCK_CHART_CAPTION if _png_aspect_ratio(png) > 1.2 else MOCK_PHOTO_CAPTION
+                for png in images
+            ]
+        )
 
     def complete_json(self, prompt: str) -> str:
         _, marker, payload = prompt.rpartition(INPUT_MARKER)

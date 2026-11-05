@@ -164,9 +164,10 @@ button:disabled {
 .viewer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   grid-template-areas:
     'toolbar toolbar'
+    'banner banner'
     'slide notes'
     'player player';
   height: 100dvh;
@@ -197,6 +198,15 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
+.banner {
+  grid-area: banner;
+  margin: 0;
+  padding: 6px 16px;
+  font-size: 14px;
+  color: #5c4300;
+  background: #fff3cd;
+}
+
 .slide-pane {
   grid-area: slide;
   overflow: auto;
@@ -212,8 +222,7 @@ button:disabled {
 .page-frame {
   position: relative;
   line-height: 0;
-  background: #fff;
-  box-shadow: 0 1px 6px rgb(0 0 0 / 0.25);
+  outline: 1px solid #d5d8dc;
 }
 
 .page-frame .muted {
@@ -221,24 +230,80 @@ button:disabled {
   padding: 24px;
 }
 
-.highlight {
+/* The sheet is white in both themes: it's paper, with the slide in the middle. */
+.sheet {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.25);
+}
+
+.hit-area {
   position: absolute;
   padding: 0;
   border: 0;
   border-radius: 2px;
-  background: var(--note-color);
-  opacity: 0.32;
-  mix-blend-mode: multiply;
+  background: transparent;
 }
 
-.highlight:hover,
-.highlight.selected {
-  opacity: 0.55;
+.hit-area:hover {
+  background: rgb(36 86 199 / 0.08);
+  border: 0;
 }
 
-.highlight.playing {
-  opacity: 0.7;
-  box-shadow: 0 0 0 2px var(--note-strong);
+.ink {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.ink-note {
+  cursor: pointer;
+  fill: none;
+  stroke: var(--ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ink-note .mark {
+  stroke-width: 1.8;
+}
+
+.ink-note .arrow {
+  stroke-width: 1;
+  opacity: 0.75;
+}
+
+.ink-note text {
+  font-family: 'Nanum Pen', 'Malgun Gothic', sans-serif;
+  fill: var(--ink);
+  stroke: none;
+  pointer-events: auto;
+}
+
+.note-hit {
+  stroke: none;
+  fill: transparent;
+  pointer-events: auto;
+}
+
+.ink-note:hover .mark,
+.ink-note.selected .mark {
+  stroke-width: 2.6;
+}
+
+.ink-note.playing .mark {
+  stroke-width: 3;
+}
+
+.ink-note.playing .arrow {
+  stroke-width: 1.6;
+  opacity: 1;
+}
+
+.ink-note.playing .note-hit {
+  fill: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
 .page-dots {
@@ -325,29 +390,35 @@ button:disabled {
   background: color-mix(in srgb, var(--note-color) 30%, transparent);
 }
 
+/* --ink matches COLORS in export_pdf.py. */
 .type-exam_hint {
+  --ink: #c72929;
   --note-color: #ff7373;
   --note-strong: #c62828;
 }
 
 .type-emphasis {
+  --ink: #b35c00;
   --note-color: #ffb359;
   --note-strong: #b35c00;
 }
 
 .type-explanation {
-  --note-color: #ffeb66;
-  --note-strong: #7d6b00;
+  --ink: #1c4da6;
+  --note-color: #7ea3f5;
+  --note-strong: #1c4da6;
 }
 
 .type-example {
+  --ink: #1f7a1f;
   --note-color: #8ce68c;
   --note-strong: #1f7a1f;
 }
 
 .type-question {
-  --note-color: #99bfff;
-  --note-strong: #1d5fc4;
+  --ink: #7333a6;
+  --note-color: #c79cf0;
+  --note-strong: #7333a6;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -360,7 +431,7 @@ button:disabled {
   }
 
   .badge.type-explanation {
-    --note-strong: #f2dd55;
+    --note-strong: #a9c9ff;
   }
 
   .badge.type-example {
@@ -368,7 +439,7 @@ button:disabled {
   }
 
   .badge.type-question {
-    --note-strong: #a9c9ff;
+    --note-strong: #d6b3f5;
   }
 }
 
@@ -396,8 +467,8 @@ button:disabled {
 
   .viewer {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1.2fr) minmax(0, 1fr) auto;
-    grid-template-areas: 'toolbar' 'slide' 'notes' 'player';
+    grid-template-rows: auto auto minmax(0, 1.2fr) minmax(0, 1fr) auto;
+    grid-template-areas: 'toolbar' 'banner' 'slide' 'notes' 'player';
   }
 
   .notes-pane {

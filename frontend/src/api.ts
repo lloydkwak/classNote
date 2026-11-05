@@ -1,5 +1,22 @@
 export type NoteType = 'explanation' | 'example' | 'emphasis' | 'exam_hint' | 'question'
 
+type Point = [number, number]
+
+/** How to draw a note by hand, in PDF points. annotated.pdf draws the same data. */
+export interface Sketch {
+  mark: 'underline' | 'circle' | 'bracket' | 'none'
+  strokes: Point[][]
+  arrow: Point[][]
+  side: 'left' | 'right'
+  x: number
+  y: number
+  width: number
+  height: number
+  font_size: number
+  line_height: number
+  lines: string[]
+}
+
 export interface Annotation {
   id: string
   block_ids: string[]
@@ -9,16 +26,21 @@ export interface Annotation {
   language: string
   start: number
   end: number
+  sketch: Sketch
 }
 
 export interface PageAnnotations {
   page: number
+  width: number
+  height: number
+  gutter: number
   notes: Annotation[]
 }
 
 export interface Annotations {
   job_id: string
   pages: PageAnnotations[]
+  incomplete: boolean
 }
 
 export type JobState =

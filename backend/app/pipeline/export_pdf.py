@@ -1,51 +1,80 @@
-"""Write annotated.pdf: the original PDF plus highlights and text annotations."""
+"""Write annotated.pdf: the original slides with notes written on them by hand.
+
+Each page is placed on a wider sheet, leaving gutters to write in. Marks and arrows are ink
+annotations, which viewers can select or hide. Margin notes are page content, written with
+a handwriting font embedded in the file, so they look right in any viewer.
+"""
 
 from pathlib import Path
 
 import pymupdf
 
-from app.models import Annotations, BBox
+from app.models import Annotation, Annotations
+from app.pipeline.layout import (
+    FONT_PATH,
+    fallback_font,
+    gutter_width,
+    line_needs_fallback,
+)
 
-# RGB from 0 to 1, per note type. The frontend uses matching colors.
-COLORS: dict[str, tuple[float, float, float]] = {
-    "exam_hint": (1.0, 0.45, 0.45),
-    "emphasis": (1.0, 0.7, 0.35),
-    "explanation": (1.0, 0.92, 0.4),
-    "example": (0.55, 0.9, 0.55),
-    "question": (0.6, 0.75, 1.0),
-}
-ICON_INSET = 22  # Points from the page's right edge, for the note's icon.
-ICON_SPACING = 22
 EXPORT_NAME = "annotated.pdf"
+HANDWRITING = "pen"
+FALLBACK = "cjk"
+MARK_WIDTH = 1.6
+ARROW_WIDTH = 1.0
+
+# RGB from 0 to 1, per note type: strong enough to read as ink. The frontend matches these.
+COLORS: dict[str, tuple[float, float, float]] = {
+    "exam_hint": (0.78, 0.16, 0.16),
+    "emphasis": (0.70, 0.36, 0.0),
+    "explanation": (0.11, 0.30, 0.65),
+    "example": (0.12, 0.48, 0.12),
+    "question": (0.45, 0.20, 0.65),
+}
 
 
-def _to_page_rect(bbox: BBox, page: pymupdf.Page) -> pymupdf.Rect:
-    """Convert a 0-1 box to PDF points, in the page's unrotated coordinates."""
-    x0, y0, x1, y1 = bbox
-    width, height = page.rect.width, page.rect.height
-    return pymupdf.Rect(x0 * width, y0 * height, x1 * width, y1 * height) * page.derotation_matrix
+def _add_ink(page: pymupdf.Page, strokes: list, offset: float, width: float, note: Annotation) -> None:
+    if not strokes:
+        return
+    shifted = [[(x + offset, y) for x, y in stroke] for stroke in strokes]
+    ink = page.add_ink_annot(shifted)
+    ink.set_colors(stroke=COLORS[note.type])
+    ink.set_border(width=width)
+    ink.set_info(title=note.type.replace("_", " "), content=note.note)
+    ink.update()
+
+
+def _write_note(page: pymupdf.Page, note: Annotation, offset: float) -> None:
+    sketch = note.sketch
+    for index, line in enumerate(sketch.lines):
+        baseline = sketch.y + index * sketch.line_height + sketch.font_size
+        page.insert_text(
+            (sketch.x + offset, baseline),
+            line,
+            fontname=FALLBACK if line_needs_fallback(line) else HANDWRITING,
+            fontsize=sketch.font_size,
+            color=COLORS[note.type],
+        )
 
 
 def export_annotated_pdf(source: Path, annotations: Annotations, output: Path) -> None:
-    with pymupdf.open(source) as document:
-        for page_notes in annotations.pages:
-            page = document[page_notes.page - 1]
-            for index, note in enumerate(page_notes.notes):
-                color = COLORS[note.type]
-                title = note.type.replace("_", " ")
-                # PDF annotation text is stored as Unicode and drawn by the viewer, so
-                # Korean needs no embedded font here.
-                info = {"title": title, "content": note.note}
-                for bbox in note.bboxes:
-                    highlight = page.add_highlight_annot(_to_page_rect(bbox, page))
-                    highlight.set_colors(stroke=color)
-                    highlight.set_info(info)
-                    highlight.update()
-                # A note icon too, so a note can be read without hovering over a highlight.
-                icon_y = ICON_INSET + index * ICON_SPACING
-                point = pymupdf.Point(page.rect.width - ICON_INSET, icon_y) * page.derotation_matrix
-                icon = page.add_text_annot(point, note.note, icon="Note")
-                icon.set_colors(stroke=color)
-                icon.set_info(info)
-                icon.update()
+    notes_by_page = {page.page: page.notes for page in annotations.pages}
+    font_bytes = FONT_PATH.read_bytes()
+    with pymupdf.open(source) as original, pymupdf.open() as document:
+        for index, source_page in enumerate(original):
+            width, height = source_page.rect.width, source_page.rect.height
+            gutter = gutter_width(width)
+            page = document.new_page(width=width + 2 * gutter, height=height)
+            page.show_pdf_page(pymupdf.Rect(gutter, 0, gutter + width, height), original, index)
+            notes = notes_by_page.get(index + 1, [])
+            if not notes:
+                continue
+            page.insert_font(fontname=HANDWRITING, fontbuffer=font_bytes)
+            page.insert_font(fontname=FALLBACK, fontbuffer=fallback_font().buffer)
+            for note in notes:
+                _write_note(page, note, gutter)
+                _add_ink(page, note.sketch.strokes, gutter, MARK_WIDTH, note)
+                _add_ink(page, note.sketch.arrow, gutter, ARROW_WIDTH, note)
+        document.set_toc(original.get_toc())
+        document.subset_fonts()  # Otherwise every export carries the whole font.
         document.save(output, garbage=3, deflate=True)

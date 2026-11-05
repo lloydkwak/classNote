@@ -56,6 +56,10 @@ SLIDES: list[tuple[str, list[str]]] = [
     ),
 ]
 
+# This slide also gets a vector chart and an embedded image, from _draw_figures.
+FIGURE_SLIDE_TITLE = "Comparing Algorithms"
+SLIDES.append((FIGURE_SLIDE_TITLE, ["Measure on real inputs"]))
+
 # (start, end, text). Covers forward moves, going back to slide 1, and an off-topic span.
 _TRANSCRIPT: list[tuple[float, float, str]] = [
     (0, 14, "오늘은 recursion을 배울 거예요. recursion은 function이 자기 자신을 다시 호출하는 거죠."),
@@ -80,7 +84,9 @@ _TRANSCRIPT: list[tuple[float, float, str]] = [
     (292, 308, "마지막으로 memoization입니다. subproblem의 결과를 table에 저장해 두고 다시 계산하지 않는 거예요."),
     (308, 324, "naive Fibonacci recursion은 같은 subproblem을 반복해서 exponential time이 걸립니다."),
     (324, 340, "fib(50)을 memoization 없이 돌리면 몇 시간이 걸려요. 직접 돌려 보면 차이가 확 느껴집니다."),
-    (340, 356, "memoized Fibonacci는 O(n)이고, 이 비교는 기말고사에 나오니까 꼭 정리해 두세요."),
+    (340, 372, "memoized Fibonacci는 O(n)이고, 이 비교는 기말고사에 나오니까 꼭 정리해 두세요."),
+    (372, 388, "자 이 bar chart 보면 merge sort의 running time이 naive recursion보다 훨씬 작습니다."),
+    (388, 404, "Comparing algorithms this way, measure them on real inputs instead of guessing."),
 ]
 
 # Ground truth for the transcript above, in the format eval_alignment.py reads.
@@ -91,12 +97,29 @@ GROUND_TRUTH: list[dict] = [
     {"start": 172, "end": 200, "page": 1},
     {"start": 200, "end": 228, "page": None},
     {"start": 228, "end": 292, "page": 4},
-    {"start": 292, "end": 356, "page": 5},
+    {"start": 292, "end": 372, "page": 5},
+    {"start": 372, "end": 404, "page": 6},
 ]
 
 
 def mock_transcript() -> list[Segment]:
     return [Segment(start=start, end=end, text=text) for start, end, text in _TRANSCRIPT]
+
+
+def _draw_figures(page: pymupdf.Page) -> None:
+    """Draw a bar chart with vectors on the right, and embed an image below the text."""
+    shape = page.new_shape()
+    base = 460
+    shape.draw_line((540, 180), (540, base))  # Axes.
+    shape.draw_line((540, base), (900, base))
+    for index, height in enumerate((80, 170, 250)):
+        left = 570 + index * 110
+        shape.draw_rect(pymupdf.Rect(left, base - height, left + 70, base))
+    shape.finish(color=(0.1, 0.2, 0.5), fill=(0.5, 0.65, 0.9), width=1.5)
+    shape.commit()
+    pixmap = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 40, 40), False)
+    pixmap.set_rect(pixmap.irect, (40, 140, 120))
+    page.insert_image(pymupdf.Rect(80, 270, 280, 470), pixmap=pixmap)
 
 
 def make_test_pdf(path: Path, slides: list[tuple[str, list[str]]] = SLIDES) -> None:
@@ -111,6 +134,8 @@ def make_test_pdf(path: Path, slides: list[tuple[str, list[str]]] = SLIDES) -> N
         for bullet in bullets:
             page.insert_text((80, y), f"- {bullet}", fontname="cjk", fontsize=22)
             y += 60
+        if title == FIGURE_SLIDE_TITLE:
+            _draw_figures(page)
         page.insert_text((60, 515), FOOTER, fontname="cjk", fontsize=12)
         page.insert_text((890, 515), str(number), fontname="cjk", fontsize=12)
     path.parent.mkdir(parents=True, exist_ok=True)

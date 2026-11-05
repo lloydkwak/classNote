@@ -3,7 +3,7 @@ import re
 
 import pytest
 
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, QuotaExhausted
 from app.models import AlignedWindow, Alignment, Annotations, Block, Note, Page, PdfExtraction
 from app.pipeline import block_align
 from app.pipeline import run as pipeline
@@ -147,8 +147,30 @@ def test_requests_run_one_at_a_time_in_order(monkeypatch):
 
     monkeypatch.setattr(block_align, "get_provider", lambda: Recording())
     extraction = PdfExtraction(pages=[PAGE.model_copy(update={"page": 1}), PAGE], key_terms=[])
-    block_align.generate_notes(alignment((0, 30, 1, "a"), (30, 60, 3, "b")), extraction)
+    _, complete = block_align.generate_notes(
+        alignment((0, 30, 1, "a"), (30, 60, 3, "b")), extraction
+    )
     assert seen == ["a", "b"]
+    assert complete is True
+
+
+def test_quota_running_out_keeps_earlier_notes_and_says_so(monkeypatch):
+    class RunsOut(ScriptedProvider):
+        def complete_json(self, prompt):
+            self.calls += 1
+            if self.calls > 1:
+                raise QuotaExhausted("limit")
+            return json.dumps([GOOD])
+
+    provider = RunsOut()
+    monkeypatch.setattr(block_align, "get_provider", lambda: provider)
+    first = SPAN.transcript
+    extraction = PdfExtraction(pages=[PAGE], key_terms=[])
+    notes, complete = block_align.generate_notes(
+        alignment((10, 40, 3, first), (40, 400, None), (400, 430, 3, "다른 내용")), extraction
+    )
+    assert len(notes) == 1
+    assert complete is False
 
 
 def note(text="note", block="p3_b0", importance=3, start=0.0, kind="explanation"):
