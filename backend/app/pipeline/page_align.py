@@ -10,24 +10,31 @@ import numpy as np
 from app.config import get_settings
 from app.models import AlignedWindow, Alignment, Page, PdfExtraction, Window
 
-# A gap this large between the best and second-best page counts as full confidence.
-FULL_CONFIDENCE_GAP = 0.1
+# A z-score gap this large between the best and second-best page is full confidence.
+FULL_CONFIDENCE_GAP = 1.0
+# Stops a near-constant best similarity from making tiny differences look like outliers.
+MIN_BEST_SCORE_SCALE = 0.005
+MAD_TO_STD = 1.4826
+MIN_WINDOWS_FOR_PAGE_BIAS = 10
 
 
 @dataclass(frozen=True)
 class AlignConfig:
-    """Penalties are in cosine-similarity units, subtracted per transition."""
+    """Scores for the DP are per-window z-scores, because e5 cosines are compressed.
 
-    next_page_penalty: float = 0.01
-    skip_penalty_per_page: float = 0.02
-    back_penalty: float = 0.1
-    off_topic_threshold: float = 0.75
+    Penalties are in those z-score units. `off_topic_threshold` is how many robust
+    standard deviations a window's best similarity may fall below the lecture's
+    typical best similarity (see `off_topic_mask`).
+    """
+
+    next_page_penalty: float = 0.2
+    skip_penalty_per_page: float = 0.4
+    back_penalty: float = 1.0
+    off_topic_threshold: float = -2.5
 
     @classmethod
-    def from_env(cls, default_threshold: float | None = None) -> "AlignConfig":
+    def from_env(cls) -> "AlignConfig":
         config = cls()
-        if default_threshold is not None:
-            config = replace(config, off_topic_threshold=default_threshold)
         names = {
             "next_page_penalty": "ALIGN_NEXT_PAGE_PENALTY",
             "skip_penalty_per_page": "ALIGN_SKIP_PENALTY_PER_PAGE",
@@ -55,18 +62,43 @@ def transition_penalties(page_count: int, config: AlignConfig) -> np.ndarray:
     return penalties
 
 
-def viterbi(similarities: np.ndarray, config: AlignConfig) -> list[int]:
-    """Return the page index per row that maximizes similarity minus move penalties."""
-    window_count, page_count = similarities.shape
+def normalize_rows(similarities: np.ndarray) -> np.ndarray:
+    """Z-score each window's row. A row with no variation becomes all zeros."""
+    means = similarities.mean(axis=1, keepdims=True)
+    stds = similarities.std(axis=1, keepdims=True)
+    return np.divide(
+        similarities - means, stds, out=np.zeros_like(similarities), where=stds > 1e-9
+    )
+
+
+def off_topic_mask(similarities: np.ndarray, config: AlignConfig) -> np.ndarray:
+    """Flag windows whose best page scores unusually low for this lecture.
+
+    This compares each window's best similarity with the other windows' best
+    similarities, using the median and MAD so the chatter itself doesn't shift the
+    baseline. A row's own z-score can't do this: its peak depends on the page count,
+    and measured chatter and lecture speech overlap on it. It assumes that most of the
+    lecture is on topic. A window that matches no page differently at all is off-topic.
+    """
+    best = similarities.max(axis=1)
+    median = np.median(best)
+    scale = max(MAD_TO_STD * np.median(np.abs(best - median)), MIN_BEST_SCORE_SCALE)
+    flat = similarities.std(axis=1) <= 1e-9
+    return flat | ((best - median) / scale < config.off_topic_threshold)
+
+
+def viterbi(scores_by_window: np.ndarray, config: AlignConfig) -> list[int]:
+    """Return the page index per row that maximizes score minus move penalties."""
+    window_count, page_count = scores_by_window.shape
     if window_count == 0:
         return []
     penalties = transition_penalties(page_count, config)
-    scores = similarities[0].copy()
+    scores = scores_by_window[0].copy()
     previous = np.zeros((window_count, page_count), dtype=int)
     for row in range(1, window_count):
         candidates = scores[:, None] - penalties
         previous[row] = candidates.argmax(axis=0)
-        scores = candidates.max(axis=0) + similarities[row]
+        scores = candidates.max(axis=0) + scores_by_window[row]
     path = [int(scores.argmax())]
     for row in range(window_count - 1, 0, -1):
         path.append(int(previous[row, path[-1]]))
@@ -97,21 +129,21 @@ def align_similarities(similarities: np.ndarray, config: AlignConfig) -> list[Wi
     """
     if similarities.shape[0] == 0 or similarities.shape[1] == 0:
         return [WindowDecision(None, 0, 0.0) for _ in range(similarities.shape[0])]
-    on_topic = np.flatnonzero(similarities.max(axis=1) >= config.off_topic_threshold)
-    path = viterbi(similarities[on_topic], config)
+    normalized = normalize_rows(similarities)
+    on_topic = np.flatnonzero(~off_topic_mask(similarities, config))
+    path = viterbi(normalized[on_topic], config)
     chosen = dict(zip(on_topic.tolist(), path))
     decisions = []
-    for index, row in enumerate(similarities):
+    for index, row in enumerate(normalized):
         page_index = chosen.get(index)
         confidence = 0.0 if page_index is None else _confidence(row, page_index)
-        decisions.append(WindowDecision(page_index, int(row.argmax()), confidence))
+        raw_page_index = int(similarities[index].argmax())
+        decisions.append(WindowDecision(page_index, raw_page_index, confidence))
     return decisions
 
 
 class E5Embedder:
     """Local multilingual embeddings. e5 models need the query/passage prefixes."""
-
-    default_off_topic_threshold = None  # Use the AlignConfig default, tuned for e5.
 
     def __init__(self, model: str) -> None:
         from sentence_transformers import SentenceTransformer  # Slow import.
@@ -131,7 +163,6 @@ class E5Embedder:
 class MockEmbedder:
     """Hashed bag of words and character pairs, for tests with no model download."""
 
-    default_off_topic_threshold = 0.05
     dimensions = 2048
 
     def _embed(self, text: str) -> np.ndarray:
@@ -185,7 +216,7 @@ def align_windows(
     config: AlignConfig | None = None,
 ) -> Alignment:
     embedder = embedder or get_embedder()
-    config = config or AlignConfig.from_env(embedder.default_off_topic_threshold)
+    config = config or AlignConfig.from_env()
     pages = extraction.pages
     similarities = similarity_matrix(windows, pages, embedder)
     decisions = align_similarities(similarities, config)

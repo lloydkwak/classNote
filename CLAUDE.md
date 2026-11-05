@@ -2,13 +2,45 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current state
+`PROMPT.md` is the full spec: LectureNote takes a lecture recording and PDF slides and attaches the professor's spoken explanations to the matching spot on the slides. It defines the directory layout, the JSON schemas, the API routes, and the build order (section 9). Read it before implementing anything.
 
-The repo has no application code yet, so there are no build, lint, test, or run commands. `PROMPT.md` is the full spec for what will be built: LectureNote, a hackathon demo that takes a lecture recording and PDF slides and attaches the professor's spoken explanations to the matching spot on the slides.
+## Setup
 
-Read `PROMPT.md` before implementing anything. It defines the directory layout, the JSON schemas, the API routes, and the build order (section 9). Replace this section with real commands once step 1 (scaffold) is done.
+Needs `uv`, Node.js, and `ffmpeg` on PATH (Windows: `winget install Gyan.FFmpeg`, or set `FFMPEG_PATH`).
 
-## Planned stack
+```sh
+cp .env.example .env            # then set GEMINI_API_KEY
+cd backend && uv sync
+cd frontend && npm install
+```
+
+## Run
+
+```sh
+cd backend && uv run uvicorn app.main:app --reload    # http://127.0.0.1:8000
+cd frontend && npm run dev                            # http://localhost:5173
+
+# Pipeline from the CLI. --from-step and --to-step take: extract, transcribe, window, align
+cd backend && uv run python scripts/run_pipeline.py --pdf slides.pdf --audio lecture.m4a
+cd backend && uv run python scripts/run_pipeline.py --job-id <id> --from-step align
+
+# No keys or models: mock transcript, mock LLM, mock embeddings
+cd backend && STT_PROVIDER=mock LLM_PROVIDER=mock EMBEDDING_PROVIDER=mock uv run python scripts/run_pipeline.py --pdf slides.pdf
+```
+
+## Test
+
+```sh
+cd backend && uv run pytest                                      # no keys needed; mocks are forced in tests/conftest.py
+cd backend && uv run pytest tests/test_page_align.py -k going_back   # a single test
+cd backend && uv run python scripts/check_llm.py                 # one real LLM call to check the key
+cd backend && uv run python scripts/eval_alignment.py data/jobs/<id>/alignment.json truth.json
+cd frontend && npm run build                                     # type-checks and builds
+```
+
+The audio tests skip when ffmpeg is missing. `scripts/make_test_pdf.py` writes the test PDF that matches the mock transcript.
+
+## Stack
 
 - **Backend:** Python 3.11+, FastAPI, `uv`, PyMuPDF, `ffmpeg`, `sentence-transformers` (`intfloat/multilingual-e5-base`)
 - **STT:** local `faster-whisper` by default, with OpenAI `whisper-1` as an optional alternative (`STT_PROVIDER`)
