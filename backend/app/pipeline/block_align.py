@@ -142,7 +142,7 @@ def strip_type_prefix(text: str) -> str:
     text = text.strip()
     for prefixes in TYPE_PREFIXES.values():
         for prefix in prefixes.values():
-            if text.startswith(prefix):
+            if text.casefold().startswith(prefix.casefold()):
                 return text[len(prefix) :].strip()
     return text
 
