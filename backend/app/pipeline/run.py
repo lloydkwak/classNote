@@ -100,7 +100,11 @@ def _read_alignment(folder: Path) -> Alignment:
 
 
 def _step_notes(folder: Path) -> None:
-    notes, complete = generate_notes(_read_alignment(folder), _read_extraction(folder))
+    notes, complete = generate_notes(
+        _read_alignment(folder),
+        _read_extraction(folder),
+        _read_list(folder / SEGMENTS_NAME, Segment),
+    )
     _write_models(folder / NOTES_NAME, notes)
     (folder / NOTES_COMPLETE_NAME).write_text(json.dumps(complete), encoding="utf-8")
 

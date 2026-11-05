@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import unicodedata
+from collections.abc import Sequence
 
 from pydantic import BaseModel, ValidationError
 
@@ -11,7 +12,7 @@ from app.cache import cached_json
 from app.llm import get_provider
 from app.llm.base import LLMProvider, QuotaExhausted
 from app.llm.mock import INPUT_MARKER
-from app.models import Alignment, Note, NoteType, Page, PdfExtraction, Span
+from app.models import Alignment, Note, NoteType, Page, PdfExtraction, Segment, Span
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +107,30 @@ def quote_in_transcript(quote: str, transcript: str) -> bool:
     return bool(normalized) and normalized in _normalize_for_match(transcript)
 
 
+def locate_quote(quote: str, segments: Sequence[Segment]) -> tuple[float, float] | None:
+    """Return when a quote was said: from its first segment's start to its last's end.
+
+    Segments are matched as one continuous text, because a quote can cross segments.
+    Returns None if the quote isn't in them.
+    """
+    target = _normalize_for_match(quote)
+    if not target:
+        return None
+    texts = [_normalize_for_match(segment.text) for segment in segments]
+    position = "".join(texts).find(target)
+    if position < 0:
+        return None
+    first = last = None
+    offset = 0
+    for segment, text in zip(segments, texts):
+        following = offset + len(text)
+        if text and position < following and position + len(target) > offset:
+            first = first or segment
+            last = segment
+        offset = following
+    return first.start, last.end
+
+
 def build_prompt(span: Span, page: Page) -> str:
     request = {
         "blocks": [
@@ -139,7 +164,10 @@ def _ask_llm(provider: LLMProvider, prompt: str) -> list[dict]:
     raise ValueError("The LLM returned invalid JSON twice.")
 
 
-def generate_span_notes(span: Span, page: Page, provider: LLMProvider) -> list[Note]:
+def generate_span_notes(
+    span: Span, page: Page, provider: LLMProvider, segments: Sequence[Segment] = ()
+) -> list[Note]:
+    """`segments` is the whole transcript, used to time each note by when it was said."""
     prompt = build_prompt(span, page)
     try:
         rows = cached_json(
@@ -152,12 +180,15 @@ def generate_span_notes(span: Span, page: Page, provider: LLMProvider) -> list[N
         return []
 
     block_ids = {block.block_id for block in page.blocks}
+    # Windows never cut a segment, so every segment is wholly inside or outside a span.
+    span_segments = [s for s in segments if span.start <= s.start and s.end <= span.end]
     notes = []
     for row in rows:
         note = LLMNote(**row)
         if not quote_in_transcript(note.quote, span.transcript):
             log.info("Dropping a note whose quote isn't in the transcript: %r", note.quote[:60])
             continue
+        start, end = locate_quote(note.quote, span_segments) or (span.start, span.end)
         notes.append(
             Note(
                 page=span.page,
@@ -167,14 +198,16 @@ def generate_span_notes(span: Span, page: Page, provider: LLMProvider) -> list[N
                 quote=note.quote,
                 language=note.language,
                 importance=note.importance,
-                start=span.start,
-                end=span.end,
+                start=start,
+                end=end,
             )
         )
     return notes
 
 
-def generate_notes(alignment: Alignment, extraction: PdfExtraction) -> tuple[list[Note], bool]:
+def generate_notes(
+    alignment: Alignment, extraction: PdfExtraction, segments: Sequence[Segment] = ()
+) -> tuple[list[Note], bool]:
     """Return the notes, and whether every span was covered.
 
     Requests go one at a time, to stay within free-tier limits. Those limits can run out
@@ -186,7 +219,7 @@ def generate_notes(alignment: Alignment, extraction: PdfExtraction) -> tuple[lis
     notes: list[Note] = []
     for span in build_spans(alignment):
         try:
-            notes.extend(generate_span_notes(span, pages[span.page], provider))
+            notes.extend(generate_span_notes(span, pages[span.page], provider, segments))
         except QuotaExhausted as error:
             log.warning("Stopping notes at %.0fs: %s", span.start, error)
             return notes, False

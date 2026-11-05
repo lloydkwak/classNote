@@ -248,3 +248,5 @@ def test_mock_chart_note_attaches_to_the_figure_block(sample_pdf):
     # Keeps the speaker's language and terms.
     assert note.language == "ko"
     assert "running time" in note.note
+    # Timed by its own transcript line, not the whole span.
+    assert (note.start, note.end) == (372, 388)
