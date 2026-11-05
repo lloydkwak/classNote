@@ -1,5 +1,6 @@
 import { useEffect, useState, type DragEvent } from 'react'
 import { createJob, getStatus, type JobState } from './api'
+import { useRecorder } from './useRecorder'
 
 const STEPS: { state: JobState; label: string }[] = [
   { state: 'extracting_pdf', label: 'Reading the slides' },
@@ -8,6 +9,10 @@ const STEPS: { state: JobState; label: string }[] = [
   { state: 'writing_notes', label: 'Writing notes' },
 ]
 const POLL_MS = 1500
+
+function formatTimer(seconds: number) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
 
 function isPdf(file: File) {
   return file.name.toLowerCase().endsWith('.pdf')
@@ -56,6 +61,12 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
   const [state, setState] = useState<JobState | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const recorder = useRecorder({
+    onStop: (recording) =>
+      setAudio(new File([recording], 'recording.webm', { type: 'audio/webm' })),
+  })
+  const recording = recorder.state !== 'idle'
 
   // Dropping both files on either zone works: each file goes where it belongs.
   const addFiles = (files: File[]) => {
@@ -141,7 +152,31 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
               onFiles={addFiles}
             />
           </div>
-          <button className="primary" disabled={!pdf || !audio || uploading} onClick={start}>
+          <div className="recorder">
+            {recording ? (
+              <>
+                <span className="recording-dot" aria-hidden="true" />
+                <span className="timer" role="timer">
+                  {formatTimer(recorder.seconds)}
+                </span>
+                <button onClick={recorder.stop} disabled={recorder.state !== 'recording'}>
+                  Stop recording
+                </button>
+              </>
+            ) : (
+              <button onClick={recorder.start}>Record instead</button>
+            )}
+          </div>
+          {recorder.error && (
+            <p className="error" role="alert">
+              {recorder.error}
+            </p>
+          )}
+          <button
+            className="primary"
+            disabled={!pdf || !audio || uploading || recording}
+            onClick={start}
+          >
             {uploading ? 'Uploading…' : 'Start'}
           </button>
         </>
