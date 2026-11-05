@@ -8,7 +8,8 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel, ValidationError
 
-from app.cache import cached_json
+from app.cache import cached_json, read_cache, write_cache
+from app.config import get_settings
 from app.llm import get_provider
 from app.llm.base import LLMProvider, QuotaExhausted
 from app.llm.mock import INPUT_MARKER
@@ -19,6 +20,10 @@ log = logging.getLogger(__name__)
 # Long spans are split, so a note's playback range stays near where it was said.
 MAX_SPAN_SECONDS = 300.0
 LECTURE_SAMPLE_CHARS = 300
+# What one batched request carries. A long reply risks being cut off, which loses every span in it.
+MAX_BATCH_CHARS = 20_000
+MAX_BATCH_SPANS = 12
+MAX_CONSECUTIVE_BATCH_FAILURES = 2
 
 TYPE_PREFIXES = {
     "exam_hint": {"ko": "★ 시험:", "en": "★ exam:"},
@@ -31,15 +36,12 @@ EMPHASIS = re.compile(
     re.IGNORECASE,
 )
 
-PROMPT = """You annotate university lecture slides using what the professor said.
-
-Below are one slide's text blocks and the transcript of the professor explaining that slide.
-
-Return a JSON array of notes. Each note has these fields:
+NOTE_FIELDS_AND_RULES = """Each note has these fields:
 - "block_ids": the ids of the blocks it relates to, or [] if it relates to the whole page
 - "type": one of "explanation", "example", "emphasis", "exam_hint", "question"
 - "note": a condensed key point, written as described below
-- "quote": the exact part of the transcript this note is based on, copied word for word
+- "quote": the exact part of the transcript this note is based on, copied word for word as one
+  continuous excerpt, including any recognition errors. Never shorten it with "...".
 - "language": "ko" or "en", the language the note is actually written in
 - "importance": a whole number from 1 (minor) to 5 (critical)
 
@@ -76,11 +78,28 @@ Rules:
   spellings or wrong words. Work out what the professor meant from the context and the slide, and
   write notes on everything you can follow. Skip only parts that make no sense even then, and
   return [] only if nothing in the transcript can be understood.
+"""
 
+PROMPT = f"""You annotate university lecture slides using what the professor said.
+
+Below are one slide's text blocks and the transcript of the professor explaining that slide.
+
+Return a JSON array of notes. {NOTE_FIELDS_AND_RULES}
+"""
+
+BATCH_PROMPT = f"""You annotate university lecture slides using what the professor said.
+
+Below are several spans of one lecture. Each has a "span" number, one slide's text blocks, and the
+transcript of the professor explaining that slide. Handle each span on its own, using only its own
+blocks and transcript.
+
+Return one JSON array of notes covering all the spans. In addition to the fields below, each note
+has "span": the number of the span it came from. {NOTE_FIELDS_AND_RULES}
 """
 
 
 class LLMNote(BaseModel):
+    span: int | None = None  # In a batched request, which span the note came from.
     block_ids: list[str] = []
     type: NoteType
     note: str
@@ -178,6 +197,13 @@ def sample_lecture(segments: Sequence[Segment]) -> str:
 def build_prompt(span: Span, page: Page, segments: Sequence[Segment] = ()) -> str:
     request = {
         "lecture_sample": sample_lecture(segments) or span.transcript[:LECTURE_SAMPLE_CHARS],
+        **_span_request(span, page),
+    }
+    return f"{PROMPT}{INPUT_MARKER}\n{json.dumps(request, ensure_ascii=False)}"
+
+
+def _span_request(span: Span, page: Page) -> dict:
+    return {
         "blocks": [
             {"block_id": block.block_id, "kind": block.kind, "text": block.text}
             for block in page.blocks
@@ -185,7 +211,17 @@ def build_prompt(span: Span, page: Page, segments: Sequence[Segment] = ()) -> st
         "transcript": span.transcript,
         "exam_hint_candidates": find_emphasis(span.transcript),
     }
-    return f"{PROMPT}{INPUT_MARKER}\n{json.dumps(request, ensure_ascii=False)}"
+
+
+def build_batch_prompt(spans: Sequence[Span], pages: dict[int, Page], sample: str) -> str:
+    request = {
+        "lecture_sample": sample,
+        "spans": [
+            {"span": index, **_span_request(span, pages[span.page])}
+            for index, span in enumerate(spans)
+        ],
+    }
+    return f"{BATCH_PROMPT}{INPUT_MARKER}\n{json.dumps(request, ensure_ascii=False)}"
 
 
 def _parse_notes(reply: str) -> list[LLMNote]:
@@ -209,21 +245,28 @@ def _ask_llm(provider: LLMProvider, prompt: str) -> list[dict]:
     raise ValueError("The LLM returned invalid JSON twice.")
 
 
+def _cache_key(provider: LLMProvider, prompt: str) -> list[str]:
+    return [provider.name, provider.model, prompt]
+
+
 def generate_span_notes(
     span: Span, page: Page, provider: LLMProvider, segments: Sequence[Segment] = ()
 ) -> list[Note]:
     """`segments` is the whole transcript, used to time each note by when it was said."""
     prompt = build_prompt(span, page, segments)
     try:
-        rows = cached_json(
-            "llm", [provider.name, provider.model, prompt], lambda: _ask_llm(provider, prompt)
-        )
+        rows = cached_json("llm", _cache_key(provider, prompt), lambda: _ask_llm(provider, prompt))
     except ValueError as error:
         # Lose this span's notes rather than the whole job. Nothing was cached, so a
         # rerun tries it again.
         log.warning("Skipping notes for page %d at %.0fs: %s", span.page, span.start, error)
         return []
+    return _notes_from_rows(rows, span, page, segments)
 
+
+def _notes_from_rows(
+    rows: list[dict], span: Span, page: Page, segments: Sequence[Segment]
+) -> list[Note]:
     block_ids = {block.block_id for block in page.blocks}
     # Windows never cut a segment, so every segment is wholly inside or outside a span.
     span_segments = [s for s in segments if span.start <= s.start and s.end <= span.end]
@@ -250,22 +293,98 @@ def generate_span_notes(
     return notes
 
 
+def _plan_batches(spans: Sequence[Span], pages: dict[int, Page]) -> list[list[Span]]:
+    """Group spans in order, up to a size that a request can answer completely."""
+    batches: list[list[Span]] = []
+    size = 0
+    for span in spans:
+        cost = len(json.dumps(_span_request(span, pages[span.page]), ensure_ascii=False))
+        if batches and size + cost <= MAX_BATCH_CHARS and len(batches[-1]) < MAX_BATCH_SPANS:
+            batches[-1].append(span)
+            size += cost
+        else:
+            batches.append([span])
+            size = cost
+    return batches
+
+
+def _ask_llm_for_batch(
+    provider: LLMProvider, spans: Sequence[Span], pages: dict[int, Page], sample: str
+) -> dict[int, list[dict]]:
+    """Return the notes for each span's index, retrying once if the reply is invalid."""
+    prompt = build_batch_prompt(spans, pages, sample)
+    for attempt in (1, 2):
+        reply = provider.complete_json(prompt)
+        try:
+            notes = _parse_notes(reply)
+            if any(note.span is None or not 0 <= note.span < len(spans) for note in notes):
+                raise ValueError("A note has no valid span number.")
+        except (ValidationError, ValueError) as error:
+            log.warning("Invalid LLM batch reply on attempt %d: %s", attempt, error)
+            continue
+        rows: dict[int, list[dict]] = {index: [] for index in range(len(spans))}
+        for note in notes:
+            rows[note.span].append(note.model_dump(exclude={"span"}))
+        return rows
+    raise ValueError("The LLM returned invalid JSON twice.")
+
+
 def generate_notes(
     alignment: Alignment, extraction: PdfExtraction, segments: Sequence[Segment] = ()
 ) -> tuple[list[Note], bool]:
     """Return the notes, and whether every span was covered.
 
-    Requests go one at a time, to stay within free-tier limits. Those limits can run out
-    partway through a lecture. The notes so far are still useful, and each finished span
-    is cached, so running again later continues from here.
+    Several spans go in each request, because free-tier limits count requests, and requests
+    go one at a time. Each span is cached on its own, so running again after the limit runs
+    out continues from where this stopped, and the notes so far are still useful.
     """
     pages = {page.page: page for page in extraction.pages}
     provider = get_provider()
-    notes: list[Note] = []
-    for span in build_spans(alignment):
+    spans = build_spans(alignment)
+    rows_by_span: dict[tuple[int, float], list[dict]] = {}
+    pending = []
+    for span in spans:
+        cached = read_cache(
+            "llm", _cache_key(provider, build_prompt(span, pages[span.page], segments))
+        )
+        if cached is None:
+            pending.append(span)
+        else:
+            rows_by_span[(span.page, span.start)] = cached
+
+    complete = True
+    if pending and get_settings().demo_mode:
+        log.warning("DEMO_MODE=1: %d spans have no cached notes.", len(pending))
+        pending, complete = [], False
+    sample = sample_lecture(segments)
+    failures = 0
+    for batch in _plan_batches(pending, pages):
         try:
-            notes.extend(generate_span_notes(span, pages[span.page], provider, segments))
+            answers = _ask_llm_for_batch(provider, batch, pages, sample)
         except QuotaExhausted as error:
-            log.warning("Stopping notes at %.0fs: %s", span.start, error)
-            return notes, False
-    return notes, True
+            log.warning("Stopping notes at %.0fs: %s", batch[0].start, error)
+            complete = False
+            break
+        except ValueError as error:  # Invalid replies. A rerun tries these spans again.
+            log.warning("Skipping %d spans at %.0fs: %s", len(batch), batch[0].start, error)
+            complete = False
+            continue
+        except Exception as error:  # Overload that outlasted the retries, or a network failure.
+            log.warning("Notes failed for %d spans at %.0fs: %s", len(batch), batch[0].start, error)
+            complete = False
+            failures += 1
+            if failures >= MAX_CONSECUTIVE_BATCH_FAILURES:
+                break
+            continue
+        failures = 0
+        for index, span in enumerate(batch):
+            prompt = build_prompt(span, pages[span.page], segments)
+            write_cache("llm", _cache_key(provider, prompt), answers[index])
+            rows_by_span[(span.page, span.start)] = answers[index]
+
+    notes: list[Note] = []
+    for span in spans:
+        rows = rows_by_span.get((span.page, span.start))
+        if rows is not None:
+            notes.extend(_notes_from_rows(rows, span, pages[span.page], segments))
+    return notes, complete

@@ -108,11 +108,23 @@ class MockProvider(LLMProvider):
         if not marker:
             return json.dumps({"ok": True})  # A connection check, not a request for notes.
         request = json.loads(payload)
+        if "spans" in request:
+            sample = request.get("lecture_sample", "")
+            notes = [
+                {**note, "span": span["span"]}
+                for span in request["spans"]
+                for note in self._span_notes({**span, "lecture_sample": sample})
+            ]
+        else:
+            notes = self._span_notes(request)
+        return json.dumps(notes, ensure_ascii=False)
+
+    def _span_notes(self, request: dict) -> list[dict]:
         candidates = request.get("exam_hint_candidates", [])
         sentences = _sentences(request.get("transcript", ""))
         language = _span_language(sentences, request.get("lecture_sample", ""))
         # It can't translate, so it only writes notes on sentences already in that language.
-        notes = [
+        return [
             _note_for(
                 sentence,
                 request.get("blocks", []),
@@ -121,4 +133,3 @@ class MockProvider(LLMProvider):
             for sentence in sentences
             if _language(sentence) == language
         ]
-        return json.dumps(notes, ensure_ascii=False)

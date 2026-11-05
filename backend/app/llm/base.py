@@ -13,8 +13,8 @@ log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-RETRYABLE_STATUS_CODES = {429, 503}
-MAX_RETRIES = 8
+RETRYABLE_STATUS_CODES = {429, 503, 504}
+MAX_RETRIES = 4
 RETRY_DELAY = re.compile(r"^(\d+(?:\.\d+)?)s$")
 
 

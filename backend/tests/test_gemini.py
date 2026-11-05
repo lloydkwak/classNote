@@ -42,6 +42,26 @@ def test_falls_back_to_the_next_model_at_the_daily_limit(monkeypatch):
     assert instance.model == first
 
 
+def test_an_overloaded_model_falls_through_to_the_next(monkeypatch):
+    class Overloaded(Exception):
+        code = 503
+
+    first, second = gemini.DEFAULT_MODELS[:2]
+    instance, fake = provider(monkeypatch)
+    real = fake.generate_content
+
+    def flaky(model, contents, config):
+        if model == first:
+            raise Overloaded()
+        return real(model, contents, config)
+
+    fake.generate_content = flaky
+    instance.retry_policy = LIVE_RETRY
+    monkeypatch.setattr("app.llm.base.time.sleep", lambda _: None)
+    assert instance.complete_json("hi") == '{"ok": true}'
+    assert instance._models[0] == second
+
+
 def test_reports_when_every_model_is_used_up(monkeypatch):
     instance, _ = provider(monkeypatch, exhausted=gemini.DEFAULT_MODELS)
     with pytest.raises(QuotaExhausted, match="tomorrow"):
