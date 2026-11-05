@@ -53,3 +53,52 @@ class Alignment(BaseModel):
 
 
 NoteType = Literal["explanation", "example", "emphasis", "exam_hint", "question"]
+
+
+class Span(BaseModel):
+    """Consecutive windows aligned to one page."""
+
+    page: int
+    start: float
+    end: float
+    transcript: str
+
+
+class Note(BaseModel):
+    page: int
+    block_ids: list[str]  # Empty means a page-level note.
+    type: NoteType
+    note: str
+    quote: str
+    language: str
+    importance: int
+    start: float
+    end: float
+
+
+class Annotation(BaseModel):
+    id: str
+    block_ids: list[str]
+    bboxes: list[BBox]
+    type: NoteType
+    note: str
+    language: str
+    start: float
+    end: float
+
+
+class PageAnnotations(BaseModel):
+    page: int
+    notes: list[Annotation]
+
+
+class Annotations(BaseModel):
+    job_id: str
+    pages: list[PageAnnotations]
+
+
+class JobStatus(BaseModel):
+    status: Literal[
+        "queued", "extracting_pdf", "transcribing", "aligning", "writing_notes", "done", "error"
+    ]
+    error: str | None = None

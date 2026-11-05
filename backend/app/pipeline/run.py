@@ -10,8 +10,10 @@ from collections.abc import Callable
 from pathlib import Path
 
 from app.config import get_settings
-from app.models import Alignment, PdfExtraction, Segment, Window
+from app.models import Alignment, Note, PdfExtraction, Segment, Window
 from app.pipeline.audio import convert_to_mp3
+from app.pipeline.block_align import generate_notes
+from app.pipeline.consolidate import consolidate
 from app.pipeline.page_align import align_windows
 from app.pipeline.pdf_extract import extract_pdf
 from app.pipeline.stt import transcribe
@@ -24,6 +26,8 @@ EXTRACTION_NAME = "extraction.json"
 SEGMENTS_NAME = "segments.json"
 WINDOWS_NAME = "windows.json"
 ALIGNMENT_NAME = "alignment.json"
+NOTES_NAME = "notes.json"
+ANNOTATIONS_NAME = "annotations.json"
 
 
 def job_dir(job_id: str) -> Path:
@@ -80,12 +84,32 @@ def _step_align(folder: Path) -> None:
     (folder / ALIGNMENT_NAME).write_text(alignment.model_dump_json(indent=2), encoding="utf-8")
 
 
+def _read_alignment(folder: Path) -> Alignment:
+    return Alignment.model_validate_json((folder / ALIGNMENT_NAME).read_text(encoding="utf-8"))
+
+
+def _step_notes(folder: Path) -> None:
+    notes = generate_notes(_read_alignment(folder), _read_extraction(folder))
+    _write_models(folder / NOTES_NAME, notes)
+
+
+def _step_consolidate(folder: Path) -> None:
+    annotations = consolidate(
+        _read_list(folder / NOTES_NAME, Note), _read_extraction(folder), folder.name
+    )
+    (folder / ANNOTATIONS_NAME).write_text(
+        annotations.model_dump_json(indent=2), encoding="utf-8"
+    )
+
+
 # (step name, status shown to the user, function), in run order.
 STEPS: list[tuple[str, str, Callable[[Path], None]]] = [
     ("extract", "extracting_pdf", _step_extract),
     ("transcribe", "transcribing", _step_transcribe),
     ("window", "aligning", _step_window),
     ("align", "aligning", _step_align),
+    ("notes", "writing_notes", _step_notes),
+    ("consolidate", "writing_notes", _step_consolidate),
 ]
 STEP_NAMES = [name for name, _, _ in STEPS]
 
