@@ -5,10 +5,12 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
+
 from app.cache import cached_json, hash_file
 from app.config import get_settings
 from app.models import Segment
-from app.pipeline.audio import split_audio
+from app.pipeline.audio import SAMPLE_RATE, split_audio
 from app.samples import mock_transcript
 
 # Whisper only keeps the last 224 tokens of a prompt. Korean uses more tokens per
@@ -18,6 +20,10 @@ OPENAI_MAX_BYTES = 25 * 1024 * 1024
 OPENAI_CHUNK_SECONDS = 50 * 60  # About 12MB at the bitrate audio.py produces.
 
 
+# Live mode decodes these greedily, which is about 3.5x faster. On large-v3-turbo the same
+# settings made the slide-term prompt loop ("Clustering for ..., Clustering for ..."), and
+# it gains little speed, so it keeps normal decoding.
+LIVE_GREEDY_MODELS = {"tiny", "base", "small"}
 # Sizes faster-whisper can download, for choosing a model per job.
 FASTER_WHISPER_MODELS = {"tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"}
 
@@ -36,28 +42,45 @@ class STTProvider(ABC):
 
 
 @lru_cache(maxsize=1)
-def _load_whisper(model: str, device: str, compute_type: str):
+def _load_whisper(model: str, device: str, compute_type: str, cpu_threads: int):
     """Keep the model loaded: reloading it costs seconds, on every chunk of a live talk."""
     from faster_whisper import WhisperModel  # Slow import, so only when transcribing.
 
-    return WhisperModel(model, device=device, compute_type=compute_type)
+    return WhisperModel(model, device=device, compute_type=compute_type, cpu_threads=cpu_threads)
 
 
 class FasterWhisperProvider(STTProvider):
     name = "faster-whisper"
 
-    def __init__(self, model: str, device: str, compute_type: str) -> None:
+    def __init__(
+        self,
+        model: str,
+        device: str,
+        compute_type: str,
+        cpu_threads: int = 0,
+        greedy: bool = False,
+    ) -> None:
         self.model = model
         self._device = device
         self._compute_type = compute_type
+        self._cpu_threads = cpu_threads
+        self._decoding = {"beam_size": 1, "temperature": 0.0} if greedy else {}
+
+    def _loaded(self):
+        return _load_whisper(self.model, self._device, self._compute_type, self._cpu_threads)
 
     def prepare(self) -> None:
-        _load_whisper(self.model, self._device, self._compute_type)
+        """Load and run the model once. The first real call was about 12s slower otherwise."""
+        silence = np.zeros(SAMPLE_RATE * 2, dtype=np.float32)
+        whisper = self._loaded()
+        for vad_filter in (False, True):  # With and without loading the VAD model.
+            list(whisper.transcribe(silence, vad_filter=vad_filter, language="en", beam_size=1)[0])
 
     def transcribe(self, audio: Path, prompt: str, language: str | None) -> list[Segment]:
-        whisper = _load_whisper(self.model, self._device, self._compute_type)
+        whisper = self._loaded()
         segments, _ = whisper.transcribe(
             str(audio),
+            **self._decoding,
             initial_prompt=prompt or None,
             language=language,
             # Without this, one language is detected at the start and kept for the
@@ -123,13 +146,19 @@ class MockSTTProvider(STTProvider):
         return mock_transcript()
 
 
-def get_stt_provider(model: str | None = None) -> STTProvider:
-    """`model` overrides `STT_MODEL` for one job."""
+def get_stt_provider(model: str | None = None, live: bool = False) -> STTProvider:
+    """`model` overrides the default for one job. `live` prefers speed over accuracy."""
     settings = get_settings()
     name = settings.stt_provider
     if name == "faster-whisper":
+        chosen = model or (settings.live_stt_model if live else settings.stt_model)
+        greedy = live and chosen in LIVE_GREEDY_MODELS
         return FasterWhisperProvider(
-            model or settings.stt_model, settings.stt_device, settings.stt_compute_type
+            chosen,
+            settings.stt_device,
+            settings.stt_compute_type,
+            cpu_threads=settings.live_stt_cpu_threads if greedy else 0,
+            greedy=greedy,
         )
     if name == "openai":
         return OpenAIWhisperProvider()

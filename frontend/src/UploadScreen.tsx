@@ -18,14 +18,13 @@ const STEPS: { state: JobState; label: string }[] = [
 ]
 const POLL_MS = 1500
 const LIVE_POLL_MS = 400
-const CHUNK_MS = 60_000
+const CHUNK_MS = Number(import.meta.env.VITE_LIVE_CHUNK_SECONDS ?? 60) * 1000
 
 // The empty value uses the server's default for the mode.
 const SPEECH_MODELS = [
   { value: '', label: 'Default' },
-  { value: 'large-v3-turbo', label: 'large-v3-turbo (most accurate)' },
-  { value: 'small', label: 'small (faster)' },
-  { value: 'base', label: 'base (fastest, least accurate)' },
+  { value: 'small', label: 'small (fast)' },
+  { value: 'large-v3-turbo', label: 'large-v3-turbo (more accurate, slower)' },
 ]
 
 function formatTimer(seconds: number) {
@@ -82,7 +81,7 @@ function liveStatusText(status: JobStatus | null, stopped: boolean, chunksSent: 
     return `Finishing up: ${status.note_count} notes so far…`
   }
   if (status.status === 'ready') return 'Ready to record.'
-  if (chunksSent === 0) return 'Recording. The first part is sent after a minute.'
+  if (chunksSent === 0) return 'Recording…'
   return `Processed ${status.chunks_processed} of ${chunksSent} parts. ${status.note_count} notes so far.`
 }
 

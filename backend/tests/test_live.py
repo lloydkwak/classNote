@@ -143,7 +143,7 @@ def test_timestamps_come_from_the_whole_recording_not_the_chunk(pdf, monkeypatch
                 length = file.getnframes() / file.getframerate()
             return [Segment(start=1, end=length - 5, text=f"chunk of {length:.0f} seconds")]
 
-    monkeypatch.setattr(live, "get_stt_provider", lambda model: ChunkClock())
+    monkeypatch.setattr(live, "get_stt_provider", lambda model, live: ChunkClock())
     session = session_for(pdf)
     feed(session, 2, finish=False)
     assert [(s.start, s.end) for s in session._segments] == [(1, 55), (61, 115)]
@@ -167,7 +167,7 @@ def test_a_segment_cut_off_by_the_chunk_end_is_transcribed_again_with_more_audio
                 ]
             return [Segment(start=0, end=20, text="half a word and more")]
 
-    monkeypatch.setattr(live, "get_stt_provider", lambda model: CutOff())
+    monkeypatch.setattr(live, "get_stt_provider", lambda model, live: CutOff())
     session = session_for(pdf)
     feed(session, 2)
     assert heard[0] == 60
@@ -178,6 +178,21 @@ def test_a_segment_cut_off_by_the_chunk_end_is_transcribed_again_with_more_audio
     ]
 
 
+def test_a_huge_segment_at_the_chunk_end_is_kept_rather_than_redone(pdf, monkeypatch):
+    class OneHugeSegment(STTProvider):
+        name = "huge"
+        model = "huge"
+
+        def transcribe(self, audio, prompt, language):
+            return [Segment(start=0, end=60, text="everything at once")]
+
+    monkeypatch.setattr(live, "get_stt_provider", lambda model, live: OneHugeSegment())
+    session = session_for(pdf)
+    feed(session, 1, finish=False)
+    assert session._committed == 60
+    assert [s.text for s in session._segments] == ["everything at once"]
+
+
 def test_final_chunk_keeps_a_segment_that_reaches_the_end(pdf, monkeypatch):
     class ToTheEnd(STTProvider):
         name = "end"
@@ -186,7 +201,7 @@ def test_final_chunk_keeps_a_segment_that_reaches_the_end(pdf, monkeypatch):
         def transcribe(self, audio, prompt, language):
             return [Segment(start=0, end=60, text="the last words")]
 
-    monkeypatch.setattr(live, "get_stt_provider", lambda model: ToTheEnd())
+    monkeypatch.setattr(live, "get_stt_provider", lambda model, live: ToTheEnd())
     session = session_for(pdf)
     session.add_audio(b"x")
     session.process(True)
@@ -382,14 +397,14 @@ def test_speech_model_is_chosen_per_job_and_checked(client, pdf, monkeypatch):
     )
     assert bad.status_code == 400
     monkeypatch.setenv("STT_PROVIDER", "faster-whisper")
-    monkeypatch.setattr("app.pipeline.stt._load_whisper", lambda *args: None)
+    monkeypatch.setattr(jobs.LiveSession, "prepare", lambda self: self._report("ready"))
     job_id = start_live(client, pdf, stt_model="base")
     other = start_live(client, pdf)
     # Wait, so nothing tries to load a real model after the fake loader is removed.
     wait_for(client, job_id, "ready")
     wait_for(client, other, "ready")
     assert jobs._sessions[job_id]._stt.model == "base"
-    assert jobs._sessions[other]._stt.model == "large-v3-turbo"
+    assert jobs._sessions[other]._stt.model == "small"
 
 
 def test_uploaded_job_uses_its_chosen_model(pdf, monkeypatch):

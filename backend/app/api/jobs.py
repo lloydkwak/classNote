@@ -103,14 +103,13 @@ def create_live_job(pdf: UploadFile, stt_model: str | None = Form(None)) -> dict
     _check_stt_model(stt_model)
     if Path(pdf.filename or "").suffix.lower() != ".pdf":
         raise HTTPException(400, "The slides must be a PDF file.")
-    settings = get_settings()
     with tempfile.TemporaryDirectory() as directory:
         pdf_path = _save_upload(pdf, Path(directory), ".pdf")
         job_id = pipeline.create_job(pdf_path, None, stt_model=stt_model)
     folder = pipeline.job_dir(job_id)
     session = LiveSession(
         job_id,
-        stt_model or settings.live_stt_model,
+        stt_model,
         lambda status, error=None, **counts: _write_status(folder, status, error, **counts),
     )
     _sessions[job_id] = session

@@ -36,6 +36,8 @@ TIMINGS_NAME = "live_timings.json"
 
 # A segment ending this close to the audio's end may be cut off, so it waits for more audio.
 CUT_OFF_SECONDS = 1.0
+# Whisper sometimes returns one huge segment. Redoing it would double the work, so keep it.
+MAX_HELD_BACK_SECONDS = 15.0
 MIN_AUDIO_SECONDS = 0.2  # Less than this isn't worth transcribing.
 # The DP may still change its mind about this many of the latest closed windows.
 UNFROZEN_WINDOWS = 2
@@ -76,7 +78,7 @@ class LiveSession:
         self.chunks_received = 0
         self.chunks_processed = 0
         self.note_count = 0
-        self._stt = get_stt_provider(stt_model)
+        self._stt = get_stt_provider(stt_model, live=True)
         self._language = None
         self._stt_prompt = ""
         self._embedder = None
@@ -149,7 +151,12 @@ class LiveSession:
         return new, duration
 
     def _commit_segments(self, new: list[Segment], duration: float, final: bool) -> None:
-        if not final and new and new[-1].end >= duration - CUT_OFF_SECONDS:
+        if (
+            not final
+            and new
+            and new[-1].end >= duration - CUT_OFF_SECONDS
+            and new[-1].end - new[-1].start <= MAX_HELD_BACK_SECONDS
+        ):
             held_back = new.pop()
             self._committed = held_back.start
         else:
