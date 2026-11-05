@@ -388,11 +388,7 @@ button:disabled {
   opacity: 1;
 }
 
-.ink-note.playing .ink.font-nanum-pen .ink-note text {
-  font-family: 'Nanum Pen', 'Malgun Gothic', sans-serif;
-}
-
-.note-hit {
+.ink-note.playing .note-hit {
   fill: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
