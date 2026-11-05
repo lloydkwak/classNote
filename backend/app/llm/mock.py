@@ -12,6 +12,17 @@ INPUT_MARKER = "INPUT_JSON:"
 MOCK_CHART_CAPTION = "Bar chart comparing the running time of merge sort and naive recursion"
 MOCK_PHOTO_CAPTION = "Photo of a printed stack trace"
 
+# The prefix is added afterward, so these leave room for it.
+NOTE_LIMITS = {"ko": 32, "en": 50}
+EXAMPLE_WORDS = re.compile(r"예를 들|for example|for instance", re.IGNORECASE)
+# (spoken ending at the end of the sentence, note-style ending)
+SPOKEN_ENDINGS = [
+    (r"(입니다|이에요|예요|이죠|죠)$", "임"),
+    (r"(합니다|해요|하죠|하세요|해 ?주세요)$", "함"),
+    (r"(됩니다|돼요|되죠)$", "됨"),
+    (r"(습니다|어요|아요|거죠|거예요|거에요|세요)$", "음"),
+]
+
 HANGUL = re.compile(r"[가-힣]")
 LATIN = re.compile(r"[A-Za-z]")
 
@@ -38,15 +49,38 @@ def _span_language(sentences: list[str], lecture_sample: str) -> str:
     return main
 
 
+def _condense(sentence: str, language: str) -> str:
+    """Turn a spoken sentence into a note, by shortening what it already says."""
+    text = re.sub(r"[.!?]+$", "", sentence.strip())
+    if language == "ko":
+        for spoken, written in SPOKEN_ENDINGS:
+            text = re.sub(spoken, written, text)
+    limit = NOTE_LIMITS.get(language, NOTE_LIMITS["en"])
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(" ", 1)[0]
+
+
+def _note_type(sentence: str, is_candidate: bool) -> str:
+    if is_candidate:
+        return "exam_hint"
+    if sentence.endswith("?"):
+        return "question"
+    if EXAMPLE_WORDS.search(sentence):
+        return "example"
+    return "explanation"
+
+
 def _note_for(sentence: str, blocks: list[dict], is_candidate: bool) -> dict:
     best = max(blocks, key=lambda block: _overlap(sentence, block["text"]), default=None)
     linked = best is not None and _overlap(sentence, best["text"]) > 0
+    language = _language(sentence)
     return {
         "block_ids": [best["block_id"]] if linked else [],
-        "type": "exam_hint" if is_candidate else "explanation",
-        "note": sentence,
+        "type": _note_type(sentence, is_candidate),
+        "note": _condense(sentence, language),
         "quote": sentence,
-        "language": _language(sentence),
+        "language": language,
         "importance": 5 if is_candidate else 2,
     }
 

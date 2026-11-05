@@ -67,6 +67,7 @@ def consolidate(
                         bboxes=[blocks[block_id].bbox for block_id in note.block_ids],
                         type=note.type,
                         note=note.note,
+                        quote=note.quote,
                         language=note.language,
                         start=note.start,
                         end=note.end,

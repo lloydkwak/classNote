@@ -21,6 +21,7 @@ from app.pipeline.block_align import (
     find_emphasis,
     generate_span_notes,
     locate_quote,
+    with_type_prefix,
     quote_in_transcript,
 )
 from app.pipeline.consolidate import consolidate, merge_duplicates
@@ -176,6 +177,43 @@ def test_segments_outside_the_span_are_not_used():
     assert (notes[0].start, notes[0].end) == (100, 130)
 
 
+@pytest.mark.parametrize(
+    ("note_type", "language", "text", "expected"),
+    [
+        ("exam_hint", "ko", "base case 빠뜨리면 감점", "★ 시험: base case 빠뜨리면 감점"),
+        ("exam_hint", "en", "base case is tested", "★ exam: base case is tested"),
+        ("example", "ko", "fib(50)", "예) fib(50)"),
+        ("example", "en", "fib(50)", "e.g. fib(50)"),
+        ("question", "ko", "왜 멈춤?", "Q. 왜 멈춤?"),
+        ("question", "en", "why stop?", "Q. why stop?"),
+        ("explanation", "ko", "base case 필요", "base case 필요"),
+        ("emphasis", "en", "key idea", "key idea"),
+    ],
+)
+def test_type_prefix_is_added(note_type, language, text, expected):
+    assert with_type_prefix(text, note_type, language) == expected
+
+
+@pytest.mark.parametrize(
+    ("note_type", "text"),
+    [("exam_hint", "★ 시험: 중요"), ("example", "예) fib(50)"), ("question", "Q. 왜?"), ("example", "e.g. fib")],
+)
+def test_type_prefix_is_not_added_twice(note_type, text):
+    assert with_type_prefix(text, note_type, "ko") == text
+
+
+def test_notes_get_their_prefix_and_keep_their_quote():
+    reply = json.dumps([{**GOOD, "type": "exam_hint", "note": "base case에서 멈춤"}])
+    note = generate_span_notes(SPAN, PAGE, ScriptedProvider(reply))[0]
+    assert note.note == "★ 시험: base case에서 멈춤"
+    assert note.quote == GOOD["quote"]
+
+
+def test_quote_reaches_the_viewer():
+    annotations = consolidate([note("A point", start=5)], EXTRACTION, "job")
+    assert annotations.pages[0].notes[0].quote == "A point"
+
+
 def test_invented_quote_is_dropped():
     invented = {**GOOD, "quote": "교수님이 말하지 않은 내용"}
     notes = generate_span_notes(SPAN, PAGE, ScriptedProvider(json.dumps([invented, GOOD])))
@@ -321,7 +359,9 @@ def test_full_pipeline_with_mocks_keeps_language_and_technical_terms(tmp_path):
 
     for item in notes:
         hangul = bool(re.search(r"[가-힣]", item.note))
-        assert item.language == ("ko" if hangul else "en")
+        # A note can be all English terms and still belong to a Korean lecture, but not
+        # the other way around.
+        assert hangul <= (item.language == "ko")
     # This lecture is mainly Korean, so a slide's notes don't flip between languages.
     for page in annotations.pages:
         assert len({item.language for item in page.notes}) == 1
@@ -331,3 +371,11 @@ def test_full_pipeline_with_mocks_keeps_language_and_technical_terms(tmp_path):
     assert "base case" in korean or "memoization" in korean or "recursion" in korean
     for translated in ["재귀", "기저 사례", "메모이제이션"]:
         assert translated not in korean
+
+    # Written like notes: short, and without polite spoken endings.
+    for item in notes:
+        assert len(item.note) <= (47 if item.language == "ko" else 67)
+        if item.language == "ko":
+            assert not re.search(r"(입니다|습니다|합니다|거죠|해요|예요|세요)$", item.note)
+        if item.type == "exam_hint":
+            assert item.note.startswith(("★ 시험:", "★ exam:"))

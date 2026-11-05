@@ -208,23 +208,31 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
           <ul>
             {notes.map((note) => (
               <li key={note.id}>
-                <button
-                  ref={note.id === activeNote?.id ? activeCardRef : undefined}
+                <div
                   className={`note-card${selectedId === note.id ? ' selected' : ''}${
                     isPlaying(note, time) ? ' playing' : ''
                   }`}
-                  onClick={() => playNote(note)}
                 >
-                  <span className="note-meta">
-                    <span className={`badge type-${note.type}`}>{TYPE_LABELS[note.type]}</span>
-                    {hasAudio && (
-                      <span className="timestamp">
-                        ▶ {formatTime(note.start)}–{formatTime(note.end)}
-                      </span>
-                    )}
-                  </span>
-                  <span lang={note.language}>{note.note}</span>
-                </button>
+                  <button
+                    ref={note.id === activeNote?.id ? activeCardRef : undefined}
+                    className="note-play"
+                    onClick={() => playNote(note)}
+                  >
+                    <span className="note-meta">
+                      <span className={`badge type-${note.type}`}>{TYPE_LABELS[note.type]}</span>
+                      {hasAudio && (
+                        <span className="timestamp">
+                          ▶ {formatTime(note.start)}–{formatTime(note.end)}
+                        </span>
+                      )}
+                    </span>
+                    <span lang={note.language}>{note.note}</span>
+                  </button>
+                  <details className="note-quote">
+                    <summary>교수님 원문</summary>
+                    <blockquote>{note.quote}</blockquote>
+                  </details>
+                </div>
               </li>
             ))}
           </ul>

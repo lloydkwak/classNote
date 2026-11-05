@@ -245,8 +245,9 @@ def test_mock_chart_note_attaches_to_the_figure_block(sample_pdf):
     assert note.bboxes == [chart.bbox]
     assert note.sketch.mark == "circle"
     assert note.sketch.arrow
-    # Keeps the speaker's language and terms.
+    # Keeps the lecture's language and its terms, and the speaker's own words are kept too.
     assert note.language == "ko"
-    assert "running time" in note.note
+    assert "bar chart" in note.note
+    assert "running time" in note.quote
     # Timed by its own transcript line, not the whole span.
     assert (note.start, note.end) == (372, 388)

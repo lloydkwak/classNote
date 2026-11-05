@@ -506,11 +506,40 @@ button:disabled {
 }
 
 .note-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.note-play {
   display: grid;
   gap: 6px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 10px 12px 6px;
   text-align: left;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.note-quote {
+  padding: 0 12px 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.note-quote summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.note-quote blockquote {
+  margin: 6px 0 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }

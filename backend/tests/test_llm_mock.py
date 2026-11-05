@@ -1,4 +1,5 @@
 import json
+import re
 
 from app.llm import get_provider
 from app.llm.mock import INPUT_MARKER
@@ -31,6 +32,25 @@ def test_notes_quote_the_transcript_and_keep_technical_terms():
     assert note["quote"] in "이 recursion이 base case에서 멈춥니다."
     assert "base case" in note["note"]
     assert note["block_ids"] == ["p1_b1"]
+
+
+def test_korean_notes_are_written_like_notes_not_speech():
+    notes = ask("이 recursion이 base case에서 멈춥니다. base case가 정말 중요한 부분이에요.", KOREAN_LECTURE)
+    assert len(notes) == 2
+    for note in notes:
+        assert not re.search(r"(입니다|습니다|합니다|거죠|해요|예요|세요)[.!?]?$", note["note"])
+        assert len(note["note"]) <= 40
+    # The quote stays verbatim.
+    assert notes[0]["quote"] == "이 recursion이 base case에서 멈춥니다."
+
+
+def test_long_notes_stay_within_the_limit_without_inventing_words():
+    long_korean = "이 recursion은 입력이 작아지면서 " + "계속 자기 자신을 다시 호출하는 구조로 " * 4 + "동작합니다."
+    note = ask(long_korean, KOREAN_LECTURE)[0]
+    assert len(note["note"]) <= 40
+    assert all(word in long_korean for word in note["note"].split())
+    long_english = "The recursion keeps calling itself on a smaller input " * 3 + "until it stops."
+    assert len(ask(long_english, "Today we cover recursion.")[0]["note"]) <= 60
 
 
 def test_one_english_sentence_does_not_flip_a_korean_lecture():

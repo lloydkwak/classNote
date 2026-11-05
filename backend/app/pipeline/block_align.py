@@ -20,6 +20,12 @@ log = logging.getLogger(__name__)
 MAX_SPAN_SECONDS = 300.0
 LECTURE_SAMPLE_CHARS = 300
 
+TYPE_PREFIXES = {
+    "exam_hint": {"ko": "★ 시험:", "en": "★ exam:"},
+    "example": {"ko": "예)", "en": "e.g."},
+    "question": {"ko": "Q.", "en": "Q."},
+}
+
 EMPHASIS = re.compile(
     r"시험|중요|꼭|외워|\bexams?\b|\bimportant\b|\bremember\b|\bmake sure\b",
     re.IGNORECASE,
@@ -32,7 +38,7 @@ Below are one slide's text blocks and the transcript of the professor explaining
 Return a JSON array of notes. Each note has these fields:
 - "block_ids": the ids of the blocks it relates to, or [] if it relates to the whole page
 - "type": one of "explanation", "example", "emphasis", "exam_hint", "question"
-- "note": 1-2 sentences
+- "note": a condensed key point, written as described below
 - "quote": the exact part of the transcript this note is based on, copied word for word
 - "language": "ko" or "en", the language the note is actually written in
 - "importance": a whole number from 1 (minor) to 5 (critical)
@@ -48,7 +54,19 @@ Rules:
   rather than translating them. If the transcript spells a term phonetically or mishears it, use
   the slide's spelling. For example, "recursion" and "base case" stay in English inside a Korean
   note.
-- Do not invent anything. Every note must be supported by its quote.
+- Write like a good student's notes: condensed key points, not spoken sentences.
+  - Korean: end with a noun or a short phrase ("~함", "~임", "~ 필요"). Never use polite spoken
+    endings such as "~입니다", "~거죠", "~해요".
+  - English: terse phrases, not full spoken sentences.
+  - Use symbols where natural: → ← ↔ < > ≪ ≈ ∴ ×
+  - Start exam_hint notes with "★ 시험:" ("★ exam:" in English), example notes with "예)" ("e.g."
+    in English), and question notes with "Q.". Explanation and emphasis notes have no prefix.
+  - Keep each note to about 40 characters in Korean or 60 in English. If a span has several
+    separate points, return them as separate notes rather than one long note.
+  For example, "여기서 제일 중요한 건 base case입니다. 없으면 안 멈춰요." becomes
+  "base case 없음 → recursion 안 멈춤".
+- Only condense what the quote actually says. Do not add conclusions, explanations, or facts that
+  are not in the quote.
 - "exam_hint_candidates" lists emphasis words found in the transcript. Use type "exam_hint" when
   the professor really is saying that something will be tested, and otherwise ignore them.
 - Blocks with "kind": "figure" are charts or images, and their "text" describes what they show.
@@ -69,6 +87,17 @@ class LLMNote(BaseModel):
     quote: str
     language: str
     importance: int = 1
+
+
+def with_type_prefix(text: str, note_type: str, language: str) -> str:
+    """Make sure a note starts with its type's marker, whatever the LLM wrote."""
+    prefixes = TYPE_PREFIXES.get(note_type)
+    if not prefixes:
+        return text
+    text = text.strip()
+    if text.startswith(tuple(prefixes.values())):
+        return text
+    return f"{prefixes.get(language, prefixes['en'])} {text}"
 
 
 def build_spans(alignment: Alignment, max_seconds: float = MAX_SPAN_SECONDS) -> list[Span]:
@@ -210,7 +239,7 @@ def generate_span_notes(
                 page=span.page,
                 block_ids=[block_id for block_id in note.block_ids if block_id in block_ids],
                 type=note.type,
-                note=note.note,
+                note=with_type_prefix(note.note, note.type, note.language),
                 quote=note.quote,
                 language=note.language,
                 importance=note.importance,

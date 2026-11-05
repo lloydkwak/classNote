@@ -108,6 +108,7 @@ class Annotation(BaseModel):
     bboxes: list[BBox]
     type: NoteType
     note: str
+    quote: str  # The professor's own words, which the note condenses.
     language: str
     start: float
     end: float
