@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Copied from pdfjs-dist on install
+public/cmaps
+public/standard_fonts
