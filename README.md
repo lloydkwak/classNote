@@ -21,7 +21,7 @@ cd frontend && npm run dev                           # http://localhost:5173
 
 ## Credits
 
-Margin notes use [Nanum Pen Script](https://fonts.google.com/specimen/Nanum+Pen+Script), under the SIL Open Font License (`backend/assets/fonts/OFL.txt`).
+Margin notes use [Pretendard](https://github.com/orioncactus/pretendard) (`backend/assets/fonts/Pretendard-LICENSE.txt`), or [Nanum Pen Script](https://fonts.google.com/specimen/Nanum+Pen+Script) (`backend/assets/fonts/OFL.txt`) with `NOTE_FONT=nanum-pen`. Both are under the SIL Open Font License.
 
 ## Test
 

@@ -6,11 +6,12 @@ import pytest
 from app.models import Block
 from app.pipeline.layout import (
     LayoutNote,
+    NOTE_FONTS,
     fallback_font,
     gutter_width,
-    handwriting_font,
     layout_page,
-    line_needs_fallback,
+    text_runs,
+    text_width,
     wrap_text,
 )
 
@@ -118,21 +119,44 @@ def test_page_level_note_has_no_mark_or_arrow():
 def test_lines_fit_the_note_width():
     sketch = only(text="이 base case가 없으면 recursion이 멈추지 않습니다. " * 4)
     assert len(sketch.lines) > 1
-    font = handwriting_font()
     for line in sketch.lines:
-        assert font.text_length(line, fontsize=sketch.font_size) <= sketch.width + 0.01
+        assert text_width(line, "pretendard", sketch.font_size) <= sketch.width + 0.01
 
 
 def test_long_word_is_broken_inside_the_line_width():
-    lines = wrap_text("x" * 400, 100, 16)
+    lines = wrap_text("x" * 400, 100, 16, "pretendard")
     assert len(lines) > 1
     assert "".join(lines) == "x" * 400
 
 
-def test_symbols_missing_from_the_handwriting_font_use_the_fallback():
-    assert line_needs_fallback("λ → x")
-    assert not line_needs_fallback("이 recursion")
-    assert fallback_font().has_glyph(ord("λ"))
+def test_only_symbols_missing_from_the_note_font_use_the_fallback():
+    assert text_runs("이 recursion → x ≪ y ≈ z ★", "pretendard") == [
+        ("이 recursion → x ≪ y ≈ z ★", False)
+    ]
+    assert text_runs("a ∴ b", "pretendard") == [("a ", False), ("∴ ", True), ("b", False)]
+    assert all(fallback_font().has_glyph(ord(char)) for char in "∴λ")
+
+
+@pytest.mark.parametrize("font_name", list(NOTE_FONTS))
+def test_note_text_never_goes_below_the_readable_minimum(font_name):
+    target = [block((0.6, 0.1, 0.9, 0.2))]
+    notes = [note(f"n{index}", "긴 설명 문장입니다 recursion. " * 30, target) for index in range(5)]
+    sketches = layout_page(notes, WIDTH, HEIGHT, font_name)
+    assert all(s.font_size >= WIDTH * NOTE_FONTS[font_name].min_size_ratio - 1e-6 for s in sketches)
+    assert_no_overlaps(sketches)
+    assert_inside_the_margins(sketches)
+
+
+@pytest.mark.parametrize("font_name", list(NOTE_FONTS))
+def test_typical_notes_keep_the_full_size_and_their_whole_text(font_name):
+    """Five notes of the requested length fit on a slide with nothing shrunk or cut."""
+    target = [block((0.6, 0.1, 0.9, 0.2))]
+    text = "base case 없음 → recursion 안 멈춤 · stack overflow 발생"
+    notes = [note(f"n{index}", text, target) for index in range(5)]
+    sketches = layout_page(notes, WIDTH, HEIGHT, font_name)
+    assert sketches[0].font_size == pytest.approx(WIDTH * NOTE_FONTS[font_name].size_ratio)
+    assert all("…" not in "".join(s.lines) for s in sketches)
+    assert_no_overlaps(sketches)
 
 
 def test_same_note_is_drawn_the_same_way_every_time():

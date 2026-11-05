@@ -4,6 +4,7 @@ import re
 import pytest
 
 from app.llm.base import LLMProvider, QuotaExhausted
+from app.llm.mock import MockProvider
 from app.models import (
     AlignedWindow,
     Alignment,
@@ -20,7 +21,10 @@ from app.pipeline.block_align import (
     build_spans,
     find_emphasis,
     generate_span_notes,
+    checked_note_type,
+    has_unsupported_number,
     locate_quote,
+    with_type_prefix,
     quote_in_transcript,
 )
 from app.pipeline.consolidate import consolidate, merge_duplicates
@@ -176,6 +180,101 @@ def test_segments_outside_the_span_are_not_used():
     assert (notes[0].start, notes[0].end) == (100, 130)
 
 
+@pytest.mark.parametrize(
+    ("note_type", "language", "text", "expected"),
+    [
+        ("exam_hint", "ko", "base case 빠뜨리면 감점", "★ 시험: base case 빠뜨리면 감점"),
+        ("exam_hint", "en", "base case is tested", "★ exam: base case is tested"),
+        ("example", "ko", "fib(50)", "예) fib(50)"),
+        ("example", "en", "fib(50)", "e.g. fib(50)"),
+        ("question", "ko", "왜 멈춤?", "Q. 왜 멈춤?"),
+        ("question", "en", "why stop?", "Q. why stop?"),
+        ("explanation", "ko", "base case 필요", "base case 필요"),
+        ("emphasis", "en", "key idea", "key idea"),
+    ],
+)
+def test_type_prefix_is_added(note_type, language, text, expected):
+    assert with_type_prefix(text, note_type, language) == expected
+
+
+@pytest.mark.parametrize(
+    ("note_type", "text"),
+    [("exam_hint", "★ 시험: 중요"), ("example", "예) fib(50)"), ("question", "Q. 왜?"), ("example", "e.g. fib")],
+)
+def test_type_prefix_is_not_added_twice(note_type, text):
+    assert with_type_prefix(text, note_type, "ko") == text
+
+
+EXAM_SPAN = Span(page=3, start=0, end=30, transcript="이 base case가 시험에 나옵니다. 그리고 멈춥니다.")
+
+
+def test_notes_get_their_prefix_and_keep_their_quote():
+    quote = "이 base case가 시험에 나옵니다"
+    reply = json.dumps([{**GOOD, "type": "exam_hint", "note": "base case 출제", "quote": quote}])
+    note = generate_span_notes(EXAM_SPAN, PAGE, ScriptedProvider(reply))[0]
+    assert note.note == "★ 시험: base case 출제"
+    assert note.type == "exam_hint"
+    assert note.quote == quote
+
+
+def test_a_marker_in_different_case_is_not_doubled():
+    quote = "이 base case가 시험에 나옵니다"
+    reply = json.dumps(
+        [{**GOOD, "type": "exam_hint", "note": "★ Exam: base case 출제", "quote": quote, "language": "en"}]
+    )
+    note = generate_span_notes(EXAM_SPAN, PAGE, ScriptedProvider(reply))[0]
+    assert note.note == "★ exam: base case 출제"
+
+
+def test_an_exam_hint_without_exam_words_in_its_quote_loses_the_claim():
+    reply = json.dumps(
+        [{**GOOD, "type": "exam_hint", "note": "★ 시험: 멈춤", "quote": "그리고 멈춥니다"}]
+    )
+    note = generate_span_notes(EXAM_SPAN, PAGE, ScriptedProvider(reply))[0]
+    assert note.type == "emphasis"
+    assert note.note == "멈춤"
+
+
+@pytest.mark.parametrize(
+    ("quote", "supported"),
+    [
+        ("이건 시험에 나옵니다", True),
+        ("기말고사 범위입니다", True),
+        ("This will be on the exam", True),
+        ("You will see this on a test", True),
+        ("이건 정말 중요합니다", False),
+        ("Remember this", False),
+        ("the latest result", False),
+    ],
+)
+def test_exam_words(quote, supported):
+    assert (checked_note_type("exam_hint", quote) == "exam_hint") is supported
+
+
+@pytest.mark.parametrize(
+    ("note_text", "quote", "unsupported"),
+    [
+        ("속도 3~4배 빠름", "미니배치가 훨씬 빠릅니다", True),
+        ("n_init=1 설정", "초기값을 직접 지정합니다", True),
+        ("5개 선택", "랜덤하게 5개를 선택합니다", False),
+        ("O(n) 필요", "메모리가 더 필요합니다", False),
+        ("x 2.5 증가", "2.5배 증가합니다", False),
+    ],
+)
+def test_numbers_in_a_note_must_be_in_its_quote(note_text, quote, unsupported):
+    assert has_unsupported_number(note_text, quote) is unsupported
+
+
+def test_a_note_with_an_invented_number_is_dropped():
+    invented = {**GOOD, "note": "속도 3~4배 빠름"}
+    assert generate_span_notes(SPAN, PAGE, ScriptedProvider(json.dumps([invented]))) == []
+
+
+def test_quote_reaches_the_viewer():
+    annotations = consolidate([note("A point", start=5)], EXTRACTION, "job")
+    assert annotations.pages[0].notes[0].quote == "A point"
+
+
 def test_invented_quote_is_dropped():
     invented = {**GOOD, "quote": "교수님이 말하지 않은 내용"}
     notes = generate_span_notes(SPAN, PAGE, ScriptedProvider(json.dumps([invented, GOOD])))
@@ -211,16 +310,140 @@ def test_requests_run_one_at_a_time_in_order(monkeypatch):
 
     class Recording(ScriptedProvider):
         def complete_json(self, prompt):
-            seen.append(json.loads(prompt.rpartition("INPUT_JSON:")[2])["transcript"])
+            request = json.loads(prompt.rpartition("INPUT_JSON:")[2])
+            seen.append([span["transcript"] for span in request["spans"]])
             return "[]"
 
     monkeypatch.setattr(block_align, "get_provider", lambda: Recording())
+    monkeypatch.setattr(block_align, "MAX_BATCH_SPANS", 1)
     extraction = PdfExtraction(pages=[PAGE.model_copy(update={"page": 1}), PAGE], key_terms=[])
     _, complete = block_align.generate_notes(
         alignment((0, 30, 1, "a"), (30, 60, 3, "b")), extraction
     )
-    assert seen == ["a", "b"]
+    assert seen == [["a"], ["b"]]
     assert complete is True
+
+
+class BatchLLM(MockProvider):
+    def __init__(self):
+        self.requests = []
+
+    def complete_json(self, prompt):
+        request = json.loads(prompt.rpartition("INPUT_JSON:")[2])
+        self.requests.append([span["span"] for span in request["spans"]])
+        return super().complete_json(prompt)
+
+
+def batch_setup(monkeypatch, llm, count=6):
+    monkeypatch.setattr(block_align, "get_provider", lambda: llm)
+    pages = [PAGE.model_copy(update={"page": number}) for number in range(1, count + 1)]
+    rows = [
+        (index * 30, index * 30 + 30, index + 1, f"이 recursion이 base case에서 멈춥니다 {index}.")
+        for index in range(count)
+    ]
+    segments = [Segment(start=s, end=e, text=t) for s, e, _, t in rows]
+    return alignment(*rows), PdfExtraction(pages=pages, key_terms=[]), segments
+
+
+def test_a_lecture_uses_one_request_for_many_spans(monkeypatch):
+    llm = BatchLLM()
+    aligned, extraction, segments = batch_setup(monkeypatch, llm)
+    notes, complete = block_align.generate_notes(aligned, extraction, segments)
+    assert llm.requests == [[0, 1, 2, 3, 4, 5]]
+    assert complete is True
+    assert [note.page for note in notes] == [1, 2, 3, 4, 5, 6]
+    # Notes keep their own page and time, and aren't mixed up across spans.
+    assert [note.start for note in notes] == [0, 30, 60, 90, 120, 150]
+    assert all(note.quote.endswith(f"{note.page - 1}.") for note in notes)
+
+
+def test_batches_respect_the_size_limits(monkeypatch):
+    llm = BatchLLM()
+    aligned, extraction, segments = batch_setup(monkeypatch, llm)
+    monkeypatch.setattr(block_align, "MAX_BATCH_SPANS", 4)
+    block_align.generate_notes(aligned, extraction, segments)
+    assert llm.requests == [[0, 1, 2, 3], [0, 1]]
+
+    llm.requests.clear()
+    monkeypatch.setenv("DATA_DIR", str(block_align.get_settings().data_dir / "other"))
+    monkeypatch.setattr(block_align, "MAX_BATCH_SPANS", 100)
+    monkeypatch.setattr(block_align, "MAX_BATCH_CHARS", 1)
+    block_align.generate_notes(aligned, extraction, segments)
+    assert len(llm.requests) == 6  # A span larger than the limit still goes, on its own.
+
+
+def test_a_rerun_only_asks_about_spans_without_notes(monkeypatch):
+    llm = BatchLLM()
+    aligned, extraction, segments = batch_setup(monkeypatch, llm)
+    block_align.generate_notes(aligned, extraction, segments)
+    assert len(llm.requests) == 1
+    block_align.generate_notes(aligned, extraction, segments)
+    assert len(llm.requests) == 1
+
+
+def test_batched_and_single_requests_share_their_cache(monkeypatch):
+    llm = BatchLLM()
+    aligned, extraction, segments = batch_setup(monkeypatch, llm)
+    block_align.generate_notes(aligned, extraction, segments)
+    span = block_align.build_spans(aligned)[0]
+    calls = len(llm.requests)
+    notes = generate_span_notes(span, extraction.pages[0], llm, segments)
+    assert notes
+    assert len(llm.requests) == calls
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "not json",
+        json.dumps([{**GOOD}]),  # No span number.
+        json.dumps([{**GOOD, "span": 99}]),  # A span that wasn't asked about.
+    ],
+)
+def test_invalid_batch_replies_are_retried_then_left_for_a_rerun(monkeypatch, bad):
+    llm = ScriptedProvider(bad, bad)
+    aligned, extraction, segments = batch_setup(monkeypatch, llm, count=2)
+    notes, complete = block_align.generate_notes(aligned, extraction, segments)
+    assert notes == []
+    assert complete is False
+    assert llm.calls == 2
+
+
+def test_an_invented_quote_in_a_batch_is_still_dropped(monkeypatch):
+    invented = {**GOOD, "span": 0, "quote": "교수님이 말하지 않은 내용"}
+    real = {**GOOD, "span": 1, "quote": "base case에서 멈춥니다"}
+    llm = ScriptedProvider(json.dumps([invented, real]))
+    aligned, extraction, segments = batch_setup(monkeypatch, llm, count=2)
+    notes, _ = block_align.generate_notes(aligned, extraction, segments)
+    assert [note.page for note in notes] == [2]
+
+
+def test_overload_loses_those_spans_but_not_the_job(monkeypatch):
+    class Overloaded(Exception):
+        code = 503
+
+    class FailsThenWorks(MockProvider):
+        calls = 0
+
+        def complete_json(self, prompt):
+            FailsThenWorks.calls += 1
+            if FailsThenWorks.calls == 1:
+                raise Overloaded("503")
+            return super().complete_json(prompt)
+
+    aligned, extraction, segments = batch_setup(monkeypatch, FailsThenWorks())
+    monkeypatch.setattr(block_align, "MAX_BATCH_SPANS", 3)
+    notes, complete = block_align.generate_notes(aligned, extraction, segments)
+    assert complete is False
+    assert [note.page for note in notes] == [4, 5, 6]
+
+
+def test_demo_mode_makes_no_requests_and_uses_what_is_cached(monkeypatch):
+    llm = BatchLLM()
+    aligned, extraction, segments = batch_setup(monkeypatch, llm)
+    monkeypatch.setenv("DEMO_MODE", "1")
+    notes, complete = block_align.generate_notes(aligned, extraction, segments)
+    assert (notes, complete, llm.requests) == ([], False, [])
 
 
 def test_quota_running_out_keeps_earlier_notes_and_says_so(monkeypatch):
@@ -229,9 +452,10 @@ def test_quota_running_out_keeps_earlier_notes_and_says_so(monkeypatch):
             self.calls += 1
             if self.calls > 1:
                 raise QuotaExhausted("limit")
-            return json.dumps([GOOD])
+            return json.dumps([{**GOOD, "span": 0}])
 
     provider = RunsOut()
+    monkeypatch.setattr(block_align, "MAX_BATCH_SPANS", 1)
     monkeypatch.setattr(block_align, "get_provider", lambda: provider)
     first = SPAN.transcript
     extraction = PdfExtraction(pages=[PAGE], key_terms=[])
@@ -291,6 +515,17 @@ def test_consolidate_attaches_bboxes_and_handles_page_level_notes():
     assert result.job_id == "job"
 
 
+def test_prompt_uses_judgment_about_language_and_shows_the_lecture():
+    segments = [Segment(start=i, end=i + 1, text=f"강의 내용 {i}") for i in range(200)]
+    prompt = block_align.build_prompt(SPAN, PAGE, segments)
+    assert "clearest to a student" in prompt
+    assert "language the professor used" not in prompt
+    sample = json.loads(prompt.rpartition("INPUT_JSON:")[2])["lecture_sample"]
+    # It reaches across the lecture, not only its opening.
+    assert "강의 내용 0" in sample and "강의 내용 33" in sample
+    assert len(sample) <= block_align.LECTURE_SAMPLE_CHARS
+
+
 def test_full_pipeline_with_mocks_keeps_language_and_technical_terms(tmp_path):
     """No API keys or downloads: mock STT, LLM, and embeddings on a mixed transcript."""
     pdf = tmp_path / "slides.pdf"
@@ -310,11 +545,23 @@ def test_full_pipeline_with_mocks_keeps_language_and_technical_terms(tmp_path):
 
     for item in notes:
         hangul = bool(re.search(r"[가-힣]", item.note))
-        assert item.language == ("ko" if hangul else "en")
-    assert {item.language for item in notes} == {"ko", "en"}
+        # A note can be all English terms and still belong to a Korean lecture, but not
+        # the other way around.
+        assert hangul <= (item.language == "ko")
+    # This lecture is mainly Korean, so a slide's notes don't flip between languages.
+    for page in annotations.pages:
+        assert len({item.language for item in page.notes}) == 1
 
     korean = " ".join(item.note for item in notes if item.language == "ko")
     # These stay in English inside Korean notes. Their translations must not appear.
     assert "base case" in korean or "memoization" in korean or "recursion" in korean
     for translated in ["재귀", "기저 사례", "메모이제이션"]:
         assert translated not in korean
+
+    # Written like notes: short, and without polite spoken endings.
+    for item in notes:
+        assert len(item.note) <= (47 if item.language == "ko" else 67)
+        if item.language == "ko":
+            assert not re.search(r"(입니다|습니다|합니다|거죠|해요|예요|세요)$", item.note)
+        if item.type == "exam_hint":
+            assert item.note.startswith(("★ 시험:", "★ exam:"))

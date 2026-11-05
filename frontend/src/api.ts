@@ -23,6 +23,7 @@ export interface Annotation {
   bboxes: [number, number, number, number][]
   type: NoteType
   note: string
+  quote: string
   language: string
   start: number
   end: number
@@ -41,6 +42,7 @@ export interface Annotations {
   job_id: string
   pages: PageAnnotations[]
   incomplete: boolean
+  note_font: string
 }
 
 export interface AlignedWindow {

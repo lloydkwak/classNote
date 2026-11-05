@@ -120,6 +120,7 @@ export function PresentScreen(props: {
         file={pdfUrl(jobId)}
         page={page}
         annotations={pageAnnotations}
+        noteFont={annotations?.note_font}
         writing={writing}
         onPageCount={setPageCount}
         onError={() => {}}

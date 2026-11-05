@@ -107,11 +107,40 @@ def test_korean_margin_notes_are_real_text_in_the_gutters(exported):
         assert KOREAN in contents
 
 
-def test_handwriting_font_is_embedded_as_a_subset(exported):
+def test_note_font_is_embedded_as_a_subset(exported):
     with pymupdf.open(exported) as document:
         fonts = document.get_page_fonts(1)
-        assert any("Nanum" in font[3] or "pen" in font[4] for font in fonts)
+        assert any("Pretendard" in font[3] for font in fonts)
     assert exported.stat().st_size < 3_000_000
+
+
+def test_symbols_come_out_as_real_text_in_the_margin(tmp_path):
+    source = tmp_path / "slides.pdf"
+    make_test_pdf(source)
+    text = "stack ≪ heap → 빠름 ≈ O(1) ∴ 사용"
+    annotations = consolidate(
+        [note(text, kind="explanation"), note("★ 시험: 나옴", kind="exam_hint", block_ids=[])],
+        EXTRACTION,
+        "job",
+    )
+    output = tmp_path / "annotated.pdf"
+    export_annotated_pdf(source, annotations, output)
+    with pymupdf.open(output) as document:
+        page_text = " ".join(document[1].get_text().split())
+    for symbol in ["≪", "→", "≈", "∴", "★", "빠름", "stack"]:
+        assert symbol in page_text
+
+
+def test_the_font_setting_is_honored(tmp_path, monkeypatch):
+    monkeypatch.setenv("NOTE_FONT", "nanum-pen")
+    source = tmp_path / "slides.pdf"
+    make_test_pdf(source)
+    annotations = consolidate([note("글자 확인", kind="explanation")], EXTRACTION, "job")
+    assert annotations.note_font == "nanum-pen"
+    output = tmp_path / "annotated.pdf"
+    export_annotated_pdf(source, annotations, output)
+    with pymupdf.open(output) as document:
+        assert any("Nanum" in font[3] for font in document.get_page_fonts(1))
 
 
 def test_figure_gets_a_circle_near_its_position(exported):

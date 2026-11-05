@@ -108,6 +108,7 @@ class Annotation(BaseModel):
     bboxes: list[BBox]
     type: NoteType
     note: str
+    quote: str  # The professor's own words, which the note condenses.
     language: str
     start: float
     end: float
@@ -125,6 +126,7 @@ class PageAnnotations(BaseModel):
 class Annotations(BaseModel):
     job_id: str
     pages: list[PageAnnotations]
+    note_font: str = "pretendard"  # Both renderers must use the font the layout measured.
     incomplete: bool = False  # The LLM's quota ran out, so some slides have no notes yet.
 
 

@@ -2,6 +2,7 @@
 
 from difflib import SequenceMatcher
 
+from app.config import get_settings
 from app.models import Annotation, Annotations, Note, PageAnnotations, PdfExtraction
 from app.pipeline.layout import LayoutNote, gutter_width, layout_page
 
@@ -32,6 +33,7 @@ def consolidate(
     max_notes_per_page: int = DEFAULT_MAX_NOTES_PER_PAGE,
 ) -> Annotations:
     merged = merge_duplicates(notes)
+    font_name = get_settings().note_font
     pages = []
     for page in extraction.pages:
         blocks = {block.block_id: block for block in page.blocks}
@@ -53,6 +55,7 @@ def consolidate(
             ],
             page.width,
             page.height,
+            font_name,
         )
         pages.append(
             PageAnnotations(
@@ -67,6 +70,7 @@ def consolidate(
                         bboxes=[blocks[block_id].bbox for block_id in note.block_ids],
                         type=note.type,
                         note=note.note,
+                        quote=note.quote,
                         language=note.language,
                         start=note.start,
                         end=note.end,
@@ -76,4 +80,4 @@ def consolidate(
                 ],
             )
         )
-    return Annotations(job_id=job_id, pages=pages)
+    return Annotations(job_id=job_id, pages=pages, note_font=font_name)
