@@ -5,6 +5,7 @@ Because each step's inputs are on disk, a run can resume from any step.
 
 import json
 import shutil
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -32,6 +33,8 @@ ALIGNMENT_NAME = "alignment.json"
 NOTES_NAME = "notes.json"
 NOTES_COMPLETE_NAME = "notes_complete.json"
 ANNOTATIONS_NAME = "annotations.json"
+REPLACE_ATTEMPTS = 10
+REPLACE_RETRY_SECONDS = 0.1
 
 
 def job_dir(job_id: str) -> Path:
@@ -104,6 +107,20 @@ def _step_align(folder: Path) -> None:
     (folder / ALIGNMENT_NAME).write_text(alignment.model_dump_json(indent=2), encoding="utf-8")
 
 
+def _write_atomically(path: Path, text: str) -> None:
+    """Replace a file that may be read at any moment, as live annotations are."""
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError:  # On Windows, while the file is being served.
+            if attempt == REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(REPLACE_RETRY_SECONDS)
+
+
 def _read_alignment(folder: Path) -> Alignment:
     return Alignment.model_validate_json((folder / ALIGNMENT_NAME).read_text(encoding="utf-8"))
 
@@ -124,9 +141,7 @@ def _step_consolidate(folder: Path) -> None:
     )
     complete = json.loads((folder / NOTES_COMPLETE_NAME).read_text(encoding="utf-8"))
     annotations.incomplete = not complete
-    (folder / ANNOTATIONS_NAME).write_text(
-        annotations.model_dump_json(indent=2), encoding="utf-8"
-    )
+    _write_atomically(folder / ANNOTATIONS_NAME, annotations.model_dump_json(indent=2))
 
 
 def _step_export(folder: Path) -> None:

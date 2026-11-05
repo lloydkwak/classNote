@@ -388,6 +388,51 @@ button:disabled {
   fill: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
+/* A note writing itself: the mark, then the arrow, then the text line by line. */
+.ink-note.writing .mark,
+.ink-note.writing .arrow {
+  stroke-dasharray: 1;
+  animation: draw-stroke var(--mark-seconds) ease-out var(--mark-delay) both;
+}
+
+.ink-note.writing .arrow {
+  animation-duration: var(--arrow-seconds);
+  animation-delay: var(--arrow-delay);
+}
+
+.ink-note.writing text {
+  animation: write-line var(--line-seconds) linear both;
+}
+
+@keyframes draw-stroke {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes write-line {
+  from {
+    clip-path: inset(-20% 100% -20% 0);
+  }
+
+  to {
+    clip-path: inset(-20% 0 -20% 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ink-note.writing .mark,
+  .ink-note.writing .arrow,
+  .ink-note.writing text {
+    animation: none;
+    stroke-dasharray: none;
+  }
+}
+
 .page-dots {
   display: flex;
   flex: none;
@@ -569,6 +614,81 @@ button:disabled {
 
 .player p {
   margin: 0;
+}
+
+/* Presentation mode */
+
+.present {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #111;
+}
+
+.present .stage {
+  flex: 1;
+}
+
+.present .sheet {
+  box-shadow: none;
+}
+
+.present .page-frame {
+  outline: 0;
+}
+
+.present-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 12px;
+  font-size: 14px;
+  color: #e8eaed;
+  background: #1d2024;
+}
+
+.present-bar button {
+  color: #e8eaed;
+  background: #2a2e33;
+  border-color: #4a4f55;
+  padding: 2px 10px;
+}
+
+.present-bar .primary {
+  color: #101317;
+  background: #7ea3f5;
+  border-color: #7ea3f5;
+}
+
+.present-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #a0a6ad;
+}
+
+.present-page {
+  font-variant-numeric: tabular-nums;
+}
+
+.present-notice {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  gap: 6px;
+}
+
+.present-notice button {
+  color: #fff;
+  background: rgb(36 86 199 / 0.92);
+  border-color: transparent;
+  padding: 4px 12px;
 }
 
 /* Debug screen */
@@ -775,6 +895,13 @@ button:disabled {
   padding: 4px 8px;
   text-align: left;
   border-bottom: 1px solid var(--border);
+}
+
+.present-choice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
 }
 
 @media (max-width: 800px) {

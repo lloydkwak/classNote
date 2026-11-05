@@ -39,6 +39,8 @@ cd backend && uv run python scripts/eval_alignment.py data/jobs/<id>/alignment.j
 cd frontend && npm run build                                     # type-checks and builds
 ```
 
+For browser tests, run servers on other ports so they can't reach a server you already have running: set `API_TARGET` for the Vite proxy, and pass `--port` to both servers.
+
 The audio tests skip when ffmpeg is missing. `scripts/make_test_pdf.py` writes the test PDF that matches the mock transcript.
 
 ## Stack
@@ -59,6 +61,7 @@ PDF extraction → figure captions → audio conversion + STT → windowing → 
 - **Page alignment is the technical differentiator:** `page_align.py` uses an order-constrained DP (Viterbi) over a windows × pages similarity matrix. Going back to an earlier page is heavily penalized but must stay allowed, and off-topic windows get `page=null`. The debug screen compares raw argmax against the DP result, so keep both available.
 - **Figures are blocks:** `pdf_extract.py` finds figures, `figure_caption.py` makes their caption the block's `text`, and from then on they align and match like text blocks.
 - **One source of geometry:** `layout.py` computes every stroke, margin position, and wrapped line into each note's `sketch`. `ViewerScreen.tsx` and `export_pdf.py` only draw it, so change the look in `layout.py`, and keep the frontend's copy of the gutter ratio and note colors in sync.
+- **Live talks:** `live.py` handles audio as it's recorded: parts of one growing webm arrive at `/api/jobs/{id}/chunks`, and only new audio is transcribed. Decided windows are frozen and a span gets notes once it closes, so each span costs one LLM call and notes never change after they appear. The upload screen's presentation mode (`PresentScreen.tsx`) polls `annotations.json` and writes new notes onto the slides.
 - **Swappable providers:** STT and LLM sit behind interfaces, and the LLM is selected with `LLM_PROVIDER` and `LLM_MODEL`. Mock versions of both must let the full pipeline run without API keys.
 
 ## Rules that span multiple modules

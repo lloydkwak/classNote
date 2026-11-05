@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/TextLayer.css'
 import type { Annotation, NoteType, PageAnnotations } from './api'
@@ -29,6 +29,16 @@ const SHEET_WIDTH_RATIO = 1 + 2 * GUTTER_RATIO
 
 const toPoints = (stroke: [number, number][]) => stroke.map(([x, y]) => `${x},${y}`).join(' ')
 
+/** Stays the same when notes are added and renumbered, so drawn notes stay on screen. */
+export function noteKey(note: Annotation) {
+  return `${note.start}:${note.note}`
+}
+
+// Seconds for each part of a note being written.
+const MARK_SECONDS = 0.7
+const ARROW_SECONDS = 0.4
+const LINE_SECONDS = 0.45
+
 export function isPlaying(note: Annotation, time: number) {
   return time >= note.start && time < note.end
 }
@@ -41,6 +51,8 @@ export function SlideSheet(props: {
   time?: number
   selectedId?: string | null
   dimInactive?: boolean
+  /** Keys of notes to animate as if being written by hand. */
+  writing?: Set<string>
   onPlayNote?: (note: Annotation) => void
   onPageCount: (count: number) => void
   onError: (message: string) => void
@@ -117,19 +129,52 @@ export function SlideSheet(props: {
           >
             {notes.map((note) => {
               const { sketch } = note
+              const key = noteKey(note)
+              // Notes arriving together are written one after another.
+              const queue = notes.filter((item) => props.writing?.has(noteKey(item)))
+              const position = queue.findIndex((item) => noteKey(item) === key)
+              const hasMark = sketch.strokes.length > 0
+              const textStart = (hasMark ? MARK_SECONDS + ARROW_SECONDS : 0)
+              const before = queue
+                .slice(0, Math.max(position, 0))
+                .reduce(
+                  (total, item) =>
+                    total +
+                    (item.sketch.strokes.length > 0 ? MARK_SECONDS + ARROW_SECONDS : 0) +
+                    item.sketch.lines.length * LINE_SECONDS,
+                  0,
+                )
+              const style = {
+                '--mark-delay': `${before}s`,
+                '--arrow-delay': `${before + MARK_SECONDS}s`,
+                '--mark-seconds': `${MARK_SECONDS}s`,
+                '--arrow-seconds': `${ARROW_SECONDS}s`,
+                '--line-seconds': `${LINE_SECONDS}s`,
+              } as CSSProperties
               return (
                 <g
-                  key={note.id}
+                  key={key}
                   className={`ink-note type-${note.type}${
                     selectedId === note.id ? ' selected' : ''
-                  }${isPlaying(note, time) ? ' playing' : ''}`}
+                  }${isPlaying(note, time) ? ' playing' : ''}${position >= 0 ? ' writing' : ''}`}
+                  style={style}
                   onClick={onPlayNote && (() => onPlayNote(note))}
                 >
                   {sketch.strokes.map((stroke, index) => (
-                    <polyline key={index} className="mark" points={toPoints(stroke)} />
+                    <polyline
+                      key={index}
+                      className="mark"
+                      pathLength={1}
+                      points={toPoints(stroke)}
+                    />
                   ))}
                   {sketch.arrow.map((stroke, index) => (
-                    <polyline key={index} className="arrow" points={toPoints(stroke)} />
+                    <polyline
+                      key={index}
+                      className="arrow"
+                      pathLength={1}
+                      points={toPoints(stroke)}
+                    />
                   ))}
                   <rect
                     className="note-hit"
@@ -138,17 +183,18 @@ export function SlideSheet(props: {
                     width={sketch.width}
                     height={sketch.height}
                   />
-                  <text lang={note.language} fontSize={sketch.font_size}>
-                    {sketch.lines.map((line, index) => (
-                      <tspan
-                        key={index}
-                        x={sketch.x}
-                        y={sketch.y + index * sketch.line_height + sketch.font_size}
-                      >
-                        {line}
-                      </tspan>
-                    ))}
-                  </text>
+                  {sketch.lines.map((line, index) => (
+                    <text
+                      key={index}
+                      lang={note.language}
+                      fontSize={sketch.font_size}
+                      x={sketch.x}
+                      y={sketch.y + index * sketch.line_height + sketch.font_size}
+                      style={{ animationDelay: `${before + textStart + index * LINE_SECONDS}s` }}
+                    >
+                      {line}
+                    </text>
+                  ))}
                 </g>
               )
             })}

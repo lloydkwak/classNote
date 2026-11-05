@@ -8,6 +8,7 @@ import {
   type JobState,
   type JobStatus,
 } from './api'
+import { enterFullscreen, PresentScreen } from './PresentScreen'
 import { useRecorder } from './useRecorder'
 
 const STEPS: { state: JobState; label: string }[] = [
@@ -18,6 +19,8 @@ const STEPS: { state: JobState; label: string }[] = [
 ]
 const POLL_MS = 1500
 const LIVE_POLL_MS = 400
+// Shorter parts when presenting, so the audience sees notes sooner.
+const PRESENT_CHUNK_MS = Number(import.meta.env.VITE_PRESENT_CHUNK_SECONDS ?? 20) * 1000
 const CHUNK_MS = Number(import.meta.env.VITE_LIVE_CHUNK_SECONDS ?? 60) * 1000
 
 // The empty value uses the server's default for the mode.
@@ -98,6 +101,12 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
   const [liveStatus, setLiveStatus] = useState<JobStatus | null>(null)
   const [chunksSent, setChunksSent] = useState(0)
   const [stopped, setStopped] = useState(false)
+  const [presenting, setPresenting] = useState(false)
+  // Read by the polling effect, which shouldn't restart when this changes.
+  const presentingRef = useRef(presenting)
+  useEffect(() => {
+    presentingRef.current = presenting
+  }, [presenting])
   // Parts go up one at a time, in order, however slow the network is.
   const uploadQueue = useRef<Promise<unknown>>(Promise.resolve())
   const nextChunk = useRef(0)
@@ -109,7 +118,7 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
   }, [])
 
   const recorder = useRecorder({
-    chunkMs: CHUNK_MS,
+    chunkMs: presenting ? PRESENT_CHUNK_MS : CHUNK_MS,
     onChunk: (blob) => {
       const id = liveId
       if (!id) return
@@ -154,7 +163,11 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
         const status = await getStatus(liveId)
         if (cancelled) return
         setLiveStatus(status)
-        if (status.status === 'done') return onDone(liveId)
+        if (status.status === 'done') {
+          // When presenting, stay on the slides until the presenter chooses to leave.
+          if (!presentingRef.current) onDone(liveId)
+          return
+        }
         if (status.status === 'error') {
           setError(status.error ?? '처리에 실패했습니다.')
           return
@@ -198,6 +211,7 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
     setStopped(false)
     setChunksSent(0)
     nextChunk.current = 0
+    if (presenting) enterFullscreen() // Only allowed directly from a click.
     void recorder.start()
   }
 
@@ -244,6 +258,25 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
   const activeIndex = STEPS.findIndex((step) => step.state === state)
   const showingLive = recording || stopped
 
+  if (presenting && showingLive && liveId) {
+    return (
+      <PresentScreen
+        jobId={liveId}
+        seconds={recorder.seconds}
+        recording={recording}
+        finished={liveStatus?.status === 'done'}
+        statusText={
+          liveStatus?.status === 'done'
+            ? `완료 · 노트 ${liveStatus.note_count}개`
+            : liveStatusText(liveStatus, stopped, chunksSent)
+        }
+        error={error ?? recorder.error}
+        onStop={stopRecording}
+        onOpenResult={() => onDone(liveId)}
+      />
+    )
+  }
+
   return (
     <main className="upload">
       <h1>LectureNote</h1>
@@ -287,6 +320,16 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
           </label>
 
           <div className="recorder">
+            {!showingLive && (
+              <label className="present-choice">
+                <input
+                  type="checkbox"
+                  checked={presenting}
+                  onChange={(event) => setPresenting(event.target.checked)}
+                />
+                발표 모드
+              </label>
+            )}
             {recording ? (
               <>
                 <span className="recording-dot" aria-hidden="true" />

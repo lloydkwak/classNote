@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 import time
 import wave
 
@@ -10,12 +11,13 @@ from app.api import jobs
 from app.llm.base import LLMProvider, QuotaExhausted
 from app.llm.mock import MockProvider
 from app.main import app
-from app.models import Segment
+from app.models import AlignedWindow, Alignment, Segment
 from app.pipeline import live
 from app.pipeline import run as pipeline
 from app.pipeline.audio import FfmpegError, find_ffmpeg
 from app.pipeline.stt import STTProvider
-from app.samples import SLIDES, make_test_pdf
+from app.pipeline.windowing import build_windows
+from app.samples import SLIDES, make_test_pdf, mock_transcript
 
 SECONDS_PER_CHUNK = 60
 
@@ -103,6 +105,60 @@ def test_each_span_gets_one_llm_call_however_many_chunks_arrive(pdf):
     assert len(llm.requests) == len(set(llm.requests))
     words = " ".join(llm.requests)
     assert words.count("오늘은 recursion을 배울 거예요") == 1
+
+
+def test_short_chunks_lose_no_mock_transcript_lines(pdf, monkeypatch):
+    """Lines cross chunk boundaries when chunks are shorter than the lines' spacing."""
+    monkeypatch.setattr(sys.modules[__name__], "SECONDS_PER_CHUNK", 5)
+    session = session_for(pdf)
+    feed(session, 90)
+    assert [s.start for s in session._segments] == [s.start for s in mock_transcript()]
+
+
+def test_a_long_stay_on_one_slide_still_gets_notes_during_the_talk(pdf, monkeypatch):
+    """Nothing moves on from page 1 here, and notes must not wait for the talk to end."""
+
+    class OnePage(STTProvider):
+        name = "one"
+        model = "one"
+        count = 0
+
+        def transcribe(self, audio, prompt, language):
+            OnePage.count += 1
+            return [Segment(start=0, end=55, text=f"Recursion and the base case, part {OnePage.count}.")]
+
+    monkeypatch.setattr(live, "get_stt_provider", lambda model, live: OnePage())
+    monkeypatch.setattr(live.LiveSession, "_align", one_page_alignment)
+    llm = CountingLLM()
+    session = session_for(pdf, llm)
+    feed(session, 5, finish=False)
+    assert llm.requests
+
+
+def one_page_alignment(self, final):
+    """Every window goes on page 1, as if the talk stayed there."""
+    windows = build_windows(self._segments)
+    closed = windows if final else windows[:-1]
+    aligned = [
+        AlignedWindow(**w.model_dump(), page=1, confidence=1, raw_page=1, similarities=[1.0])
+        for w in closed
+    ]
+    self._frozen_pages = [1] * len(aligned)
+    return Alignment(windows=aligned, pages=[1])
+
+
+def test_a_full_window_counts_without_waiting_for_the_next_line(pdf, monkeypatch):
+    class OneFullWindow(STTProvider):
+        name = "full"
+        model = "full"
+
+        def transcribe(self, audio, prompt, language):
+            return [Segment(start=0, end=40, text="Recursion and the base case.")]
+
+    monkeypatch.setattr(live, "get_stt_provider", lambda model, live: OneFullWindow())
+    session = session_for(pdf)
+    feed(session, 1, finish=False)
+    assert len(pipeline.read_alignment(session.job_id).windows) == 1
 
 
 def test_a_closed_span_does_not_wait_for_the_end(pdf):
