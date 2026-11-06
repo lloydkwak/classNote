@@ -29,3 +29,9 @@ Margin notes use [Pretendard](https://github.com/orioncactus/pretendard) (`backe
 cd backend && uv run pytest
 cd backend && uv run python scripts/check_llm.py     # one real LLM call to check your key
 ```
+
+## Ubuntu / local Qwen3-VL experiments
+
+See [Ubuntu service and VLM runbook](docs/ubuntu_vlm.md), [implementation plan](docs/advanced_annotation_plan.md),
+and [GPU measurements](docs/gpu_benchmark.md). The opt-in single-page Qwen3-VL-8B NF4 worker runs in
+an isolated environment; the existing annotation pipeline remains the service default.

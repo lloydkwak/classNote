@@ -152,3 +152,75 @@ off-topic gold를 사람이 작성하고 별도 test 강의에서 실험을 반�
 최종 검증: backend **369 passed (189.68s)**, frontend player **25 passed**, production build
 passed(기존 bundle warning), diff whitespace 검사 통과. notes-run 연결은 마지막 출처 검사
 integration test로 별도 재검증했다. 이번 변경은 미커밋이며 새 의존성/기존 파일 삭제 없음.
+
+## Ubuntu RTX 3080 인수 — Advanced Annotation Phase A/B
+
+시작 `28b3aa3` clean main. GitHub ls-remote도 동일 SHA. 이전 Windows의 작업은 이미
+GitHub에 반영돼 있다. 현재 clone에는 실제 강의 PDF/audio/job이 없고 golden JSON만 있다.
+과거 evaluation 수치를 이번 환경에서 재측정한 것으로 취급하지 않는다.
+
+### 환경과 중요한 차이
+
+- Ubuntu 24.04.4 / kernel 6.14.0-37, i9-12900, RAM 62 GiB.
+- 호스트 RTX 3080 10240 MiB, compute capability 8.6, driver 550.163.01, CUDA 12.4 정상.
+  sandbox에서는 GPU device가 보이지 않아 `nvidia-smi`/torch CUDA가 실패한다.
+  이 실패를 driver 고장으로 판단하거나 시스템 driver를 재설치하지 말 것.
+- 기존 backend `uv sync --frozen` 성공. lock은 torch 2.15/CUDA 13 계열로 VLM과 격리.
+- VLM `.venv-vlm`은 기존 system torch 2.6.0+cu124 / torchvision 0.21.0+cu124 재사용,
+  transformers 4.57.6, accelerate 1.12.0, bitsandbytes 0.49.0, PyMuPDF 1.26.7.
+- 시스템 Node 20으로 player test 실행 불가. `.cache/node/node_modules/node/bin/node`
+  (22.23.4)를 PATH 앞에 두면 기존 25 tests/build 통과. 시스템 Node 교체 없음.
+- uv는 `.venv-tools/bin/uv`, cache는 workspace `.cache/uv`. 모델/대형 파일/venv는 ignored.
+- 디스크 부족으로 공식 checkpoint 다운로드는 승인된 **호스트** `/dev/shm/classnote-hf`
+  (32 GiB RAM tmpfs). sandbox의 같은 경로에는 없을 수 있고 재부팅 후 사라진다.
+
+### 구현 범위
+
+- `backend/app/vlm/`: fixed 8B config, single-page schema, lazy NF4/SDPA subprocess provider.
+  VLM process 간 lease, thread serialization, timeout/close, OOM child 재생성 + budget 감소 1회,
+  schema 검증, atomic response cache, demo cache-only, failure JSON telemetry.
+- `backend/scripts/benchmark_vlm.py`: preflight/download/smoke. 공식 revision 고정, manifest
+  disk guard, synthetic/real PDF page PNG, 실제 2회 uncached 요청, GPU/RAM/token/latency 기록.
+- `backend/requirements-vlm.txt`, `docs/ubuntu_vlm.md`: 격리 환경과 재실행 절차.
+- 기존 production pipeline/API/frontend/planner/layout/resume는 변경하지 않았다.
+  `VisualGroundingProvider.analyze_page`는 diagnostic 페이지 분석만 제공한다.
+  element-ID `select_targets`, Evidence Graph, coverage/layout 개선은 Phase C 이후 작업이다.
+- 기존 STT/e5에 GPU lease를 아직 적용하지 않았다. 실제 API 연결 전 중앙 scheduler 필요.
+
+### 검증과 다음 단계
+
+기존 369개 + 초기 VLM 11개 전체 **380 passed, 39.77s** (host).
+추가 crash/invalid JSON telemetry 포함 새 VLM **13 passed, 2.94s**, frontend **25 passed**,
+Node 22 build passed, VLM pip check passed. OOM/timeout/crash recovery는 **mock** 검증이다.
+실제 GPU smoke의 최종 결과와 성능은 `docs/gpu_benchmark.md`를 진실의 기준으로 삼는다.
+
+Phase A 완료. Phase B 게이트는 실제 8B smoke 측정 기록으로 판단한다.
+그다음 기존 `pdf_extract.py`의 word/line/block ID, OCR source, marked image/free-space를 재사용해
+회전/crop/scale 좌표 검증 → SoM element ID 선택 → rich evidence/action provenance 연결 순서로 진행.
+실강의 A/B, 사람 verified target/meaning 라벨, 복잡한 수식/한국어/이미지형 슬라이드는 아직 미검증.
+
+추가 VLM 테스트를 포함한 최종 전체 backend 회귀: **382 passed, 36.14s**.
+
+### 실제 GPU 결과 — Phase B 실행 게이트 통과
+
+- `gpu-smoke-01`: 8B 실제 추론은 됐으나 0–1000 bbox로 schema 실패. raw/metrics 보존.
+  JSON Schema의 coordinate 범위를 명시하고 prompt를 v2로 바꿨다.
+- `gpu-smoke-02`: 동일 slide 실제 2회/cache hit 0/schema 2/2, load 9.562s,
+  wall 15.273/3.138s, generation 3.864/3.125s, input/output 709/127씩,
+  peak device 7.459 GiB. worker peak RSS 약 5.55 GiB, RAM tmpfs weight 약 16.34 GiB 별도.
+- `gpu-oom-recovery`: 실제 의도적 CUDA OOM 2회 및 새 worker에서 복구 2/2.
+  8B 유지, 131072 pixels/1024 input cap/256 output cap. CPU offload 없음.
+- `gpu-multipage`: 서로 다른 synthetic p1/p2를 같은 worker에서 처리, schema 2/2,
+  p2 재로딩 없음. 긴 강의 안정성 검증은 아니다.
+- 최종 `nvidia-smi`: 10MiB/Xorg만 남음. benchmark parent/worker 메모리 반환 확인.
+- raw 결과는 모두 ignored `data/vlm-runs/`. 가중치는 `/dev/shm/classnote-hf`.
+  **재부팅하면 모델 캐시가 사라지므로** 장기 실행 전 여유 디스크로 캐시를 옮기거나 재다운로드.
+
+제목/text는 일치하지만 수식 영역 누락·graph 설명/범위 오류가 남는다. 사람 검증·실강의 A/B는
+없으며 최고 품질 필기 목표가 완료된 것이 아니다. C–F는 다음 작업이고 기존 서비스가 기본 경로다.
+
+변경 파일: `.gitignore`, `README.md`, `backend/requirements-vlm.txt`,
+`backend/app/vlm/{__init__,schema,runtime,provider}.py`, `backend/scripts/benchmark_vlm.py`,
+`backend/tests/test_vlm.py`, `docs/{advanced_annotation_plan,gpu_benchmark,annotation_quality_report,
+technology_decisions,codex_handoff,ubuntu_vlm}.md`.
+commit/push 없음. 기존 강의·비밀키·캐시·lockfile·production planner/layout/frontend 파일 보존.

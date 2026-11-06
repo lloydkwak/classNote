@@ -11,6 +11,12 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-tools/
+.venv-vlm/
+/models/
+.cache/
+*.safetensors
+*.gguf
 .pytest_cache/
 
 # Node

@@ -57,3 +57,48 @@ provisional로만 가져온다. CLI 지표는 라벨/예측 구간 교집합을 
 lexical hybrid와 segment-boundary snapping은 평가 전용 옵션이다. 실강의 잠정 라벨에서
 current 대비 개선이 없어 production 정렬에 적용하지 않았다. provider SDK 응답의 사용량을
 기록하지만 cache hit에 과거 토큰을 신규 사용량으로 더하지 않고, 모르는 비용은 null로 둔다.
+
+## Ubuntu RTX 3080 — Phase A/B
+
+### 실제 적용
+
+- Qwen **8B Instruct**를 고정하고 공식 revision
+  `0c351dd01ed87e9c1b53cbc748cba10e6187ff3b`를 사용한다.
+  [공식 model card](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct)의
+  `Qwen3VLForConditionalGeneration` / `AutoProcessor.apply_chat_template` API를 따른다.
+- Transformers 4.57.6 / accelerate 1.12.0 / bitsandbytes 0.49.0 실제 설치와 API import 확인.
+  [NF4/double quant 공식 API](https://huggingface.co/docs/transformers/quantization/bitsandbytes),
+  FP16 compute, SDPA, batch=1. 외부 GGUF/projector나 비공식 양자화 checkpoint는 쓰지 않는다.
+- 기존 torch 2.6.0+cu124 / torchvision 0.21.0+cu124를 별도 VLM venv에서 재사용.
+  [공식 cu124 빌드](https://pytorch.org/get-started/previous-versions/)와 드라이버 550.163.01,
+  compute capability 8.6에서 CUDA 접근 확인. backend lock은 변경하지 않았다.
+- PyMuPDF는 기존 서비스 의존성을 유지하며 smoke PDF/PNG 렌더에만 사용한다.
+  모델 결과 bbox는 diagnostic image 영역이다. 원본 PDF geometry를 덮어쓰지 않는다.
+- provider는 lazy subprocess + thread lock + POSIX GPU lease를 사용한다. timeout/close 시
+  종료하고 OOM 시 child를 새로 만들며 입력 축소 1회 재시도. 성공 schema만 캐시한다.
+  API 통합 전 실험으로 opt-in CLI에서만 사용한다. 중앙 scheduler의 기존 STT/e5 통합은 미완료.
+- 데이터/모델은 Git ignore. 다운로드는 FP16 원본 약 17.55GB이며 NF4는 로딩 시 적용한다.
+  디스크 부족으로 이번에는 명시적으로 승인된 RAM tmpfs 캐시를 사용한다.
+
+### 문서 도구 후보 — 문헌 검토, 설치/품질 비교 미실행
+
+아래 선택은 classNote의 기존 PDF 좌표·OCR·free-space 구현과 단일 10GB GPU 제약에 따른
+**후속 실험 우선순위**다. 어느 도구도 한국어/수식 정확도가 검증됐다고 주장하지 않는다.
+
+| 후보 | classNote에서 검토할 역할 | 이번 결정 및 이유 |
+|---|---|---|
+| [Docling](https://github.com/docling-project/docling) | layout/reading order/table/formula, JSON provenance | Phase C 첫 실험 후보. 코드 MIT, 개별 모델 license 별도. 기존 geometry를 보완할 선택적 parser로 평가 |
+| [MinerU](https://github.com/opendatalab/MinerU) | 복잡한 수식·표/이미지형 PDF | 미설치. 모델/runtime 및 추가 license 조건을 확인하고 별도 worker 비교 필요 |
+| [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) | 혼합 언어 OCR/문서 구조 | 미설치. 기존 RapidOCR/PP-OCR 한국어 경로와 중복. 원본 PDF text와 OCR 결과는 분리 유지 |
+| [Surya](https://github.com/datalab-to/surya) | 다국어 OCR/layout/reading order | 보류. code와 model license가 다르고 새 GPU resident model을 추가하기 전 필요성 검증 필요 |
+| [Marker](https://github.com/datalab-to/marker) | PDF→JSON/Markdown, 수식·표 추출 | 보류. 전체 변환기 교체보다 기존 좌표 시스템 보완이 우선. model license는 code와 별도 확인 필요 |
+| [UniMERNet](https://github.com/opendatalab/UniMERNet) | 수식 crop→LaTeX | 수식 심볼 문제를 실제 재현한 뒤 선택적 worker로 검토. 식 전체 인식이 symbol 좌표 정답은 아님 |
+
+[Microsoft SoM](https://github.com/microsoft/SoM)은 ID 마킹 아이디어만 참고하며 기존
+`pdf_extract.py`의 marked image를 재사용할 계획이다. SoM 코드를 복사하지 않았다.
+[SlideNote](https://github.com/Cat-blizzard/SlideNote)는 AGPL-3.0로 표시돼 코드 복사 없이
+coverage 개념만 참고한다. [AfterLecture](https://github.com/wcboy/AfterLecture)는 MIT로
+표시되지만 확장 PDF 구현은 기존 export부터 검토한다. 이들 참고 프로젝트의 소스 복사/설치는 하지 않았다.
+OR-Tools도 layout의 실제 제약 문제를 확인한 뒤 필요할 때만 도입한다.
+
+실측과 미완료 게이트는 `gpu_benchmark.md`, 사용법은 `ubuntu_vlm.md`를 따른다.
