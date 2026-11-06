@@ -1,0 +1,23 @@
+[
+  {"start": 35, "end": 91, "pages": [8, 9], "note": "anomaly detection as an application"},
+  {"start": 143, "end": 255, "pages": [9, 10], "note": "choosing the number of clusters, no ground truth"},
+  {"start": 255, "end": 356, "pages": [10, 11], "note": "what K-Means is: centroids and assignment"},
+  {"start": 356, "end": 500, "pages": [13, 14], "note": "algorithm steps, assign and update"},
+  {"start": 503, "end": 600, "pages": [15], "note": "no optimum guarantee, results vary by init"},
+  {"start": 605, "end": 697, "pages": [16], "note": "init by hand, several runs, inertia"},
+  {"start": 697, "end": 833, "pages": [17], "note": "K-Means++"},
+  {"start": 833, "end": 970, "pages": [18], "note": "accelerated and mini-batch K-Means"},
+  {"start": 970, "end": 1011, "pages": [19], "note": "use mini-batch for large data"},
+  {"start": 1038, "end": 1102, "pages": [20], "note": "inertia is not enough, elbow"},
+  {"start": 1102, "end": 1197, "pages": [21], "note": "silhouette coefficient formula, a and b"},
+  {"start": 1197, "end": 1268, "pages": [22], "note": "silhouette score plot"},
+  {"start": 1269, "end": 1532, "pages": [22, 23], "note": "silhouette diagram, k=4 vs k=5"},
+  {"start": 1533, "end": 1605, "pages": [24], "note": "limits of K-Means"},
+  {"start": 1610, "end": 1686, "pages": [26, 27], "note": "semantic and instance segmentation"},
+  {"start": 1686, "end": 1749, "pages": [27, 28], "note": "10 colors, color-based segmentation"},
+  {"start": 1749, "end": 1836, "pages": [29, 30, 31, 32, 33, 34], "note": "preprocessing and semi-supervised, too garbled to separate"},
+  {"start": 1836, "end": 1972, "pages": [35], "note": "DBSCAN core instances"},
+  {"start": 1972, "end": 2072, "pages": [35, 36], "note": "DBSCAN conditions and scale, understand your data"},
+  {"start": 2073, "end": 2103, "pages": [37], "note": "other clustering algorithms"},
+  {"start": 2103, "end": 2149, "pages": [37, 38], "note": "next week: Gaussian mixtures need likelihood"}
+]

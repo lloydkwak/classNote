@@ -61,6 +61,28 @@ export interface Alignment {
   pages: number[]
 }
 
+export interface AudioRange {
+  start: number
+  end: number
+  confidence: number
+  source_window_ids: string[]
+  reason: 'first_visit' | 'revisit'
+}
+
+export interface PageAudioEntry {
+  page: number
+  audio_ranges: AudioRange[]
+  primary_start: number | null
+  total_duration: number
+}
+
+export interface PageAudio {
+  schema_version: number
+  pages: PageAudioEntry[]
+  duration: number
+  unmatched_seconds: number
+}
+
 export type JobState =
   | 'queued'
   | 'extracting_pdf'
@@ -135,5 +157,6 @@ export const finishLiveJob = (jobId: string) => postForm(`/api/jobs/${jobId}/fin
 
 export const getStatus = (jobId: string) => getJson<JobStatus>(`/api/jobs/${jobId}`)
 export const getAlignment = (jobId: string) => getJson<Alignment>(`/api/jobs/${jobId}/debug`)
+export const getPageAudio = (jobId: string) => getJson<PageAudio>(`/api/jobs/${jobId}/page-audio`)
 export const getAnnotations = (jobId: string) =>
   getJson<Annotations>(`/api/jobs/${jobId}/annotations`)

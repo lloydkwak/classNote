@@ -21,7 +21,7 @@ cd backend && uv run uvicorn app.main:app --reload    # http://127.0.0.1:8000
 cd frontend && npm run dev                            # http://localhost:5173
 
 # Pipeline from the CLI. --from-step and --to-step take:
-# extract, caption, transcribe, window, align, evidence, notes, consolidate, export
+# extract, caption, transcribe, window, align, page_audio, evidence, notes, consolidate, export
 cd backend && uv run python scripts/run_pipeline.py --pdf slides.pdf --audio lecture.m4a
 cd backend && uv run python scripts/run_pipeline.py --job-id <id> --from-step align
 
@@ -36,6 +36,7 @@ cd backend && uv run pytest                                      # no keys neede
 cd backend && uv run pytest tests/test_page_align.py -k going_back   # a single test
 cd backend && uv run python scripts/check_llm.py                 # one real LLM call to check the key
 cd backend && uv run python scripts/eval_alignment.py data/jobs/<id>/alignment.json truth.json
+cd frontend && npm test                                          # the player's state machine
 cd frontend && npm run build                                     # type-checks and builds
 ```
 
@@ -59,6 +60,7 @@ PDF extraction → figure captions → audio conversion + STT → windowing → 
 
 - **Resumable steps:** each step saves its output as JSON in the job folder, so a run can restart from any step with `--from-step`.
 - **Page alignment is the technical differentiator:** `page_align.py` uses an order-constrained DP (Viterbi) over a windows × pages similarity matrix. Going back to an earlier page is heavily penalized but must stay allowed, and off-topic windows get `page=null`. The debug screen compares raw argmax against the DP result, so keep both available.
+- **Page audio is independent of notes:** `page_audio.py` turns the alignment into each page's ranges of the recording, including revisits, and `page_audio.json` is written before any LLM call. `playback.ts` is the player's state machine, which plays a page's ranges in order and stops; `useLecturePlayer.ts` connects it to the audio element. Which page is on screen and which is playing are separate.
 - **Figures are blocks:** `pdf_extract.py` finds figures, `figure_caption.py` makes their caption the block's `text`, and from then on they align and match like text blocks.
 - **One source of geometry:** `layout.py` computes every stroke, margin position, and wrapped line into each note's `sketch`. `ViewerScreen.tsx` and `export_pdf.py` only draw it, so change the look in `layout.py`, and keep the frontend's copy of the gutter ratio and note colors in sync.
 - **Live talks:** `live.py` handles audio as it's recorded: parts of one growing webm arrive at `/api/jobs/{id}/chunks`, and only new audio is transcribed. Decided windows are frozen and a span gets notes once it closes, so each span costs one LLM call and notes never change after they appear. The upload screen's presentation mode (`PresentScreen.tsx`) polls `annotations.json` and writes new notes onto the slides.
