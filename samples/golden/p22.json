@@ -1,0 +1,87 @@
+{
+  "page": 22,
+  "job": "lecture-v2",
+  "actions": [
+    {
+      "type": "highlight",
+      "target": {
+        "words": [
+          "p22_w3",
+          "p22_w4"
+        ]
+      },
+      "role": "key_term",
+      "importance": 4,
+      "quote": "슬랩스토어 같은 경우에는 아까 인화사랑은 다르게",
+      "reason": "Silhouette score is misheard as 슬랩스토어. This tests the need for a glossary."
+    },
+    {
+      "type": "note",
+      "target": {
+        "words": [
+          "p22_w3",
+          "p22_w4"
+        ]
+      },
+      "role": "explanation",
+      "hint": "near",
+      "importance": 5,
+      "text": "잘 모여 있고 서로 떨어져 있을수록 score가 좋음",
+      "quote": "슬랩스토어 잘 모여있고 안이 떨어져있고 다행이 떨어져있고 잘 모여있기 때문에 슬랩스토어 좋은 거고",
+      "reason": "What the score means, which this slide doesn't say."
+    },
+    {
+      "type": "circle",
+      "target": {
+        "figure": "p22_b5",
+        "region": [
+          385,
+          50,
+          475,
+          195
+        ]
+      },
+      "importance": 5,
+      "quote": "아까 인화사랑을 찍어봤을 때 4에서 7가 나왔는데",
+      "reason": "The k=4 peak. '4에서 7' may be misheard: please check."
+    },
+    {
+      "type": "underline",
+      "target": {
+        "words": [
+          "p22_w22",
+          "p22_w24"
+        ]
+      },
+      "style": "single",
+      "importance": 4,
+      "quote": "아까 인화사랑을 찍어봤을 때 4에서 7가 나왔는데",
+      "reason": "The text version of the same point."
+    },
+    {
+      "type": "underline",
+      "target": {
+        "words": [
+          "p22_w53",
+          "p22_w59"
+        ]
+      },
+      "style": "single",
+      "importance": 3,
+      "quote": "슬랩스토어 같은 경우에는 아까 인화사랑은 다르게",
+      "reason": "He contrasts it with inertia."
+    },
+    {
+      "type": "box",
+      "target": {
+        "words": [
+          "p22_w71",
+          "p22_w73"
+        ]
+      },
+      "importance": 2,
+      "quote": "이것을 가지고 각각 매장의 매출 콘텐츠를 계산을 해서",
+      "reason": "OCR words. Least sure of this one, because the speech is garbled."
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "page": 17,
+  "job": "lecture-v2",
+  "actions": [
+    {
+      "type": "note",
+      "target": {
+        "words": [
+          "p17_w30",
+          "p17_w30"
+        ]
+      },
+      "role": "explanation",
+      "hint": "near",
+      "importance": 3,
+      "text": "centroid = 각 cluster의 중심점",
+      "quote": "세트로이드는 어느 역할에 가클러스의 중심점입니다.",
+      "reason": "A definition the slide assumes."
+    },
+    {
+      "type": "circle",
+      "target": {
+        "words": [
+          "p17_w74",
+          "p17_w76"
+        ]
+      },
+      "importance": 4,
+      "quote": "전체 인턴스가 유일폼하게 모두 포기원들이 같은 상태로 하나를 뽑아요.",
+      "reason": "OCR words. He explains step 1 here."
+    },
+    {
+      "type": "box",
+      "target": {
+        "figure": "p17_b6",
+        "region": [
+          850,
+          205,
+          1000,
+          335
+        ]
+      },
+      "importance": 5,
+      "quote": "이 선택 SI와 이미 선택된 센트로이드 사이의 거리를 의미합니다.",
+      "reason": "'자 보면': he points at the formula's D. OCR missed these lines, so this tests a region."
+    },
+    {
+      "type": "highlight",
+      "target": {
+        "words": [
+          "p17_w91",
+          "p17_w97"
+        ]
+      },
+      "role": "emphasis",
+      "importance": 5,
+      "quote": "각각의 인스턴트가 이미 확대 된 세트로이드와 멀면 멀수로 다음 세트로이드로 흔들던 성도를 높이게 달아야 합니다.",
+      "reason": "The core idea of K-Means++."
+    },
+    {
+      "type": "note",
+      "target": {
+        "words": [
+          "p17_w91",
+          "p17_w97"
+        ]
+      },
+      "role": "explanation",
+      "hint": "near",
+      "importance": 5,
+      "text": "cluster끼리 overlap 안 되게 하려는 것",
+      "quote": "서로 많이 오버렉이 안되야되는거잖아요.",
+      "reason": "The reason, which the slide doesn't give."
+    },
+    {
+      "type": "mark",
+      "target": {
+        "lines": [
+          "p17_l12",
+          "p17_l12"
+        ]
+      },
+      "symbol": "check",
+      "importance": 2,
+      "quote": "총 3개의 세트로를 뽑아내는",
+      "reason": "He finishes the worked example of the repeat step."
+    }
+  ]
+}

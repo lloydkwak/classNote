@@ -1,0 +1,99 @@
+{
+  "page": 20,
+  "job": "lecture-v2",
+  "actions": [
+    {
+      "type": "highlight",
+      "target": {
+        "words": [
+          "p20_w43",
+          "p20_w44"
+        ]
+      },
+      "role": "emphasis",
+      "importance": 5,
+      "quote": "이나사가 더 좋은 게 좋은 건 아니다",
+      "reason": "He says the same thing as the slide's 'No!'."
+    },
+    {
+      "type": "underline",
+      "target": {
+        "words": [
+          "p20_w59",
+          "p20_w66"
+        ]
+      },
+      "style": "single",
+      "importance": 4,
+      "quote": "이만큼 결정하면 이나사가 더 있다는 곳인데",
+      "reason": "Tests an underline across two lines. This quote is garbled: please check."
+    },
+    {
+      "type": "highlight",
+      "target": {
+        "words": [
+          "p20_w69",
+          "p20_w69"
+        ]
+      },
+      "role": "key_term",
+      "importance": 4,
+      "quote": "이렇게 엘포인트가 진행한다 라고 얘기를 하는데",
+      "reason": "He names the elbow."
+    },
+    {
+      "type": "circle",
+      "target": {
+        "figure": "p20_b9",
+        "region": [
+          420,
+          440,
+          530,
+          610
+        ]
+      },
+      "importance": 5,
+      "quote": "이렇게 엘포인트가 진행한다 라고 얘기를 하는데",
+      "reason": "Tests a region: the elbow point on the chart."
+    },
+    {
+      "type": "connect",
+      "source": {
+        "words": [
+          "p20_w69",
+          "p20_w69"
+        ]
+      },
+      "to": {
+        "figure": "p20_b9",
+        "region": [
+          420,
+          440,
+          530,
+          610
+        ]
+      },
+      "importance": 3,
+      "quote": "이렇게 엘포인트가 진행한다 라고 얘기를 하는데",
+      "reason": "Tests an arrow from text to a figure region."
+    },
+    {
+      "type": "note",
+      "target": {
+        "figure": "p20_b9",
+        "region": [
+          420,
+          440,
+          530,
+          610
+        ]
+      },
+      "role": "explanation",
+      "hint": "near",
+      "importance": 5,
+      "text": "inertia가 더 이상 가파르게 줄지 않는 시점",
+      "quote": "어휘가 아파르게 죽지 않는 행위의 시점이 나오면",
+      "reason": "How to read the elbow. This slide has almost no free space, so this tests placement."
+    }
+  ]
+}
