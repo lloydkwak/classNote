@@ -219,6 +219,7 @@ export function DebugScreen({ jobId }: { jobId: string }) {
     <main className="debug">
       <header className="debug-header">
         <h1>시간별 정렬 결과</h1>
+        <a className="button" href={`#/jobs/${jobId}/inspect`}>평가 라벨 편집</a>
         <a className="button" href={`#/jobs/${jobId}`}>
           슬라이드로 돌아가기
         </a>

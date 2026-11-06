@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "dataset_id": "synthetic-example",
+  "dataset_version": "0.1.0",
+  "revision": 0,
+  "lecture_id": "synthetic-example",
+  "split": "development",
+  "inputs": {},
+  "provenance": "Invented schema example only; no real lecture data and no human verification",
+  "alignment_labels": [
+    {"id": "visit-1", "start": 0, "end": 10, "pages": [2], "review": {"status": "provisional", "source": "synthetic"}},
+    {"id": "multiple", "start": 10, "end": 20, "pages": [3, 4], "review": {"status": "uncertain", "source": "synthetic"}},
+    {"id": "visit-2", "start": 20, "end": 30, "pages": [2], "review": {"status": "provisional", "source": "synthetic"}},
+    {"id": "off-topic", "start": 30, "end": 40, "pages": [], "review": {"status": "provisional", "source": "synthetic"}}
+  ],
+  "transitions": [
+    {"id": "revisit", "time": 20, "from_pages": [3, 4], "to_pages": [2], "revisit": true,
+     "review": {"status": "provisional", "source": "synthetic"}}
+  ],
+  "meaning_units": [
+    {"id": "unit-1", "start": 0, "end": 8, "pages": [2], "content": "An invented teaching point.",
+     "source_quote": "An invented teaching point.", "segment_ids": [0], "importance": 4,
+     "review": {"status": "provisional", "source": "synthetic"}}
+  ],
+  "meaning_review_ranges": [],
+  "matches": []
+}

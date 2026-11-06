@@ -34,6 +34,13 @@ class OpenAIProvider(LLMProvider):
             ),
             policy=self.retry_policy,
         )
+        usage = getattr(response, "usage", None)
+        self.last_usage = {
+            "model": self.model,
+            "input_tokens": getattr(usage, "prompt_tokens", None),
+            "output_tokens": getattr(usage, "completion_tokens", None),
+            "total_tokens": getattr(usage, "total_tokens", None),
+        }
         return response.choices[0].message.content or ""
 
     def describe_images(self, prompt: str, images: list[bytes]) -> str:

@@ -1,0 +1,383 @@
+{
+  "$defs": {
+    "InputIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "identifier": {
+          "title": "Identifier",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identifier",
+        "sha256"
+      ],
+      "title": "InputIdentity",
+      "type": "object"
+    },
+    "Interval": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "number"
+        },
+        "pages": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "title": "Pages",
+          "type": "array"
+        },
+        "review": {
+          "$ref": "#/$defs/Review"
+        }
+      },
+      "required": [
+        "id",
+        "start",
+        "end"
+      ],
+      "title": "Interval",
+      "type": "object"
+    },
+    "MatchReview": {
+      "additionalProperties": false,
+      "properties": {
+        "item_id": {
+          "title": "Item Id",
+          "type": "string"
+        },
+        "unit_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Unit Ids",
+          "type": "array"
+        },
+        "relevant": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relevant"
+        },
+        "entailed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entailed"
+        },
+        "duplicate_of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duplicate Of"
+        },
+        "review": {
+          "$ref": "#/$defs/Review"
+        }
+      },
+      "required": [
+        "item_id"
+      ],
+      "title": "MatchReview",
+      "type": "object"
+    },
+    "MeaningUnit": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "number"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "number"
+        },
+        "pages": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "title": "Pages",
+          "type": "array"
+        },
+        "review": {
+          "$ref": "#/$defs/Review"
+        },
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "source_quote": {
+          "minLength": 1,
+          "title": "Source Quote",
+          "type": "string"
+        },
+        "segment_ids": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "title": "Segment Ids",
+          "type": "array"
+        },
+        "importance": {
+          "default": 3,
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Importance",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "start",
+        "end",
+        "content",
+        "source_quote"
+      ],
+      "title": "MeaningUnit",
+      "type": "object"
+    },
+    "Review": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "default": "draft",
+          "enum": [
+            "draft",
+            "provisional",
+            "uncertain",
+            "verified"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "source": {
+          "default": "human",
+          "enum": [
+            "human",
+            "synthetic",
+            "legacy_inference",
+            "system"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "author": {
+          "default": "",
+          "title": "Author",
+          "type": "string"
+        },
+        "reviewed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed At"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "title": "Review",
+      "type": "object"
+    },
+    "Transition": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "time": {
+          "minimum": 0,
+          "title": "Time",
+          "type": "number"
+        },
+        "from_pages": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "From Pages",
+          "type": "array"
+        },
+        "to_pages": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "To Pages",
+          "type": "array"
+        },
+        "revisit": {
+          "default": false,
+          "title": "Revisit",
+          "type": "boolean"
+        },
+        "review": {
+          "$ref": "#/$defs/Review"
+        }
+      },
+      "required": [
+        "id",
+        "time",
+        "from_pages",
+        "to_pages"
+      ],
+      "title": "Transition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "dataset_id": {
+      "minLength": 1,
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "dataset_version": {
+      "default": "0.1.0",
+      "minLength": 1,
+      "title": "Dataset Version",
+      "type": "string"
+    },
+    "revision": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "lecture_id": {
+      "minLength": 1,
+      "title": "Lecture Id",
+      "type": "string"
+    },
+    "split": {
+      "default": "unassigned",
+      "enum": [
+        "development",
+        "test",
+        "unassigned"
+      ],
+      "title": "Split",
+      "type": "string"
+    },
+    "inputs": {
+      "additionalProperties": {
+        "$ref": "#/$defs/InputIdentity"
+      },
+      "default": {},
+      "title": "Inputs",
+      "type": "object"
+    },
+    "alignment_labels": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Interval"
+      },
+      "title": "Alignment Labels",
+      "type": "array"
+    },
+    "transitions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Transition"
+      },
+      "title": "Transitions",
+      "type": "array"
+    },
+    "meaning_units": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/MeaningUnit"
+      },
+      "title": "Meaning Units",
+      "type": "array"
+    },
+    "matches": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/MatchReview"
+      },
+      "title": "Matches",
+      "type": "array"
+    },
+    "meaning_review_ranges": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Interval"
+      },
+      "title": "Meaning Review Ranges",
+      "type": "array"
+    },
+    "provenance": {
+      "default": "",
+      "title": "Provenance",
+      "type": "string"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "lecture_id"
+  ],
+  "title": "EvaluationDataset",
+  "type": "object"
+}

@@ -1043,6 +1043,16 @@ button:disabled {
   cursor: pointer;
 }
 
+.inspector { padding: 20px; height: 100vh; overflow: auto; }
+.inspector-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+.inspector-slide { height: 450px; position: relative; }
+.inspector audio, .inspector textarea { width: 100%; }
+.inspector textarea { font-family: monospace; }
+.inspector-transcript { max-height: 350px; overflow: auto; }
+.inspector-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+.inspector-fields label { display: grid; }
+@media (max-width: 800px) { .inspector-columns { grid-template-columns: minmax(0, 1fr); } }
+
 .detailed-notes article {
   padding: 12px 0;
   border-bottom: 1px solid var(--border);

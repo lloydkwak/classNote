@@ -111,3 +111,44 @@ D/E는 기존 renderer 기반 density·상세 노트 연결까지 부분 완료�
 
 최종 변경: backend core/API/model/cache 연결, frontend viewer/API/CSS, 정렬 비교
 스크립트, 새 regression tests, `.env.example`, 본 문서와 technology decisions.
+
+## 다음 스프린트: 재현 가능한 실강의 평가 기반 (2026-11-06)
+
+이전 구현은 `3bdca24`로 commit/push되었다. 이번 시작은 그 commit의 clean `main`이며,
+기존 rich notes와 page playback 구현은 재작성하지 않았다.
+
+- 기준선 재확인: backend **352 passed (82.91s)**, frontend **25 passed**, build passed.
+- 새 `backend/app/evaluation/`: schema v1, verified 출처 규칙, 시간 교집합 alignment 지표,
+  사람 unit 매칭 기반 notes 지표, saved/current/hybrid/refined 실험, SHA256/Git provenance,
+  로컬 라벨 revision 저장과 optimistic conflict 검증.
+- `backend/app/api/evaluation.py`: EVALUATION_MODE=1에서만 켜지는 개발 API.
+  `frontend/src/InspectorScreen.tsx`와 `#/jobs/<id>/inspect`: PDF/audio/transcript, 실험 예측,
+  구간 라벨 및 전체 dataset JSON 편집/저장/재로드. verified 저장은 별도 사람 확인 필수.
+- `backend/scripts/evaluate_lecture.py`: status/init/import-legacy/benchmark/smoke/schema.
+- `samples/golden/evaluation.schema.json`, `evaluation_example.json`: 개인정보 없는 버전 관리 schema와 synthetic 예제.
+- 기존 provider와 rich_notes에 SDK usage, cache hit, 호출/runtime, span 진단, 탈락 후보 보존을 추가했다.
+  SDK retry의 HTTP 요청 수와 과금 비용은 미확인(null)이며 provider call과 구별한다.
+- 실제 데이터는 ignored `data/`에만 저장. 원본 PDF/audio/alignment/STT를 덮어쓰지 않았다.
+
+### 실제 평가 결과와 다음 우선순위
+
+`lecture-turbo` 잠정 21개 라벨을 provisional/legacy_inference로 가져왔다(verified=0).
+기본 모드 정확도=null. 명시적 provisional 평가의 시간 교집합 exact는 saved=30.435%,
+current=48.241%, hybrid=48.241%, hybrid_refined=48.241%. 이전 midpoint 지표와 분모가 다르다.
+새 방식은 개선을 입증하지 못해 production 기본값을 변경하지 않았다.
+
+실제 Gemini **1회 호출**(35초 구간): 후보 2개(definition/explanation), 모두 인용 불일치로
+탈락, 최종 상세 항목 0·annotation 0. input/output/total tokens=583/419/2049, 전체 9.755초.
+이후 같은 응답의 캐시 재생(외부 호출 0)과 mock 결과(항목 1개)를 분리 저장했다.
+캐시 재생을 신규 실제 LLM 호출로 보고하지 않는다. 사람 의미 검토와 실제 coverage는 미측정.
+
+다음 P0는 첫 페이지/입력 정렬 검증과 source_quote_not_found 원인 확인이다. 검증 규칙은
+완화하지 않았다. 이후 exhaustive meaning review range와 unit↔item 매칭, transition/revisit/
+off-topic gold를 사람이 작성하고 별도 test 강의에서 실험을 반복한다.
+
+전체 사용법, 지표 정의, 로컬 artifact 위치 및 제약은 `docs/evaluation_report.md`에 있다.
+브라우저 E2E/실제 사람 verified 라벨 생성은 미실행이며 자동 verified 생성 경로는 없다.
+
+최종 검증: backend **369 passed (189.68s)**, frontend player **25 passed**, production build
+passed(기존 bundle warning), diff whitespace 검사 통과. notes-run 연결은 마지막 출처 검사
+integration test로 별도 재검증했다. 이번 변경은 미커밋이며 새 의존성/기존 파일 삭제 없음.

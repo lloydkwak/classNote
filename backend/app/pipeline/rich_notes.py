@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import time
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -49,6 +50,7 @@ class ValidationRecord(BaseModel):
     status: Literal["accepted", "rejected", "unavailable"]
     reason: str
     recovery_attempted: bool = False
+    candidate: ExtractedItem | None = None
 
 
 class DetailedNotes(BaseModel):
@@ -59,6 +61,8 @@ class DetailedNotes(BaseModel):
     validation: list[ValidationRecord] = []
     complete: bool = True
     coverage: dict = {}
+    telemetry: dict = {}
+    spans: list[dict] = []
 
 
 CONTENT_PROMPT = """Extract the meaningful teaching units from this lecture transcript.
@@ -79,10 +83,20 @@ slide_reference. Never invent coordinates or timestamps.
 """
 
 
-def _ask(provider, prompt):
+def _ask(provider, prompt, telemetry=None):
     for attempt in range(2):
         try:
-            data = json.loads(provider.complete_json(prompt))
+            started = time.perf_counter()
+            if telemetry is not None:
+                telemetry["provider_calls"] += 1
+            try:
+                reply = provider.complete_json(prompt)
+                if telemetry is not None:
+                    telemetry["usage_events"].append(getattr(provider, "last_usage", None))
+            finally:
+                if telemetry is not None:
+                    telemetry["provider_seconds"] += time.perf_counter() - started
+            data = json.loads(reply)
             rows = data["items"]
             if not isinstance(rows, list):
                 raise ValueError("Expected items array")
@@ -97,6 +111,10 @@ def extract_content(alignment: Alignment, extraction: PdfExtraction, segments: l
     provider = provider or get_provider()
     pages = {page.page: page for page in extraction.pages}
     result = DetailedNotes()
+    started = time.perf_counter()
+    result.telemetry = {"provider": provider.name, "model": provider.model, "provider_calls": 0,
+                        "cache_hits": 0, "provider_seconds": 0.0, "usage_events": [],
+                        "cost": None, "http_attempts": None}
     for span in build_spans(alignment, max_seconds=120):
         page = pages[span.page]
         local = [(index, segment) for index, segment in enumerate(segments)
@@ -108,14 +126,23 @@ def extract_content(alignment: Alignment, extraction: PdfExtraction, segments: l
         }
         prompt = CONTENT_PROMPT + INPUT_MARKER + json.dumps(request, ensure_ascii=False)
         prefix = hashlib.sha256(f"{span.page}:{span.start}:{prompt}".encode()).hexdigest()[:16]
+        diagnostic = {"span_id": prefix, "page": span.page, "start": span.start, "end": span.end,
+                      "status": "pending", "accepted": 0, "rejected": 0}
+        result.spans.append(diagnostic)
+        before_calls = result.telemetry["provider_calls"]
         try:
             rows = cached_json("content", [provider.name, provider.model, prompt],
-                               lambda: _ask(provider, prompt))
+                               lambda: _ask(provider, prompt, result.telemetry))
+            result.telemetry["cache_hits"] += before_calls == result.telemetry["provider_calls"]
         except Exception as error:
+            diagnostic["status"] = "unavailable"
+            diagnostic["reason"] = type(error).__name__
             result.complete = False
             result.validation.append(ValidationRecord(item_id=prefix, status="unavailable",
-                                      reason=type(error).__name__, recovery_attempted=True))
+                                      reason=type(error).__name__,
+                                      recovery_attempted=result.telemetry["provider_calls"] - before_calls > 1))
             continue
+        diagnostic["status"] = "empty" if not rows else "processed"
         for index, row in enumerate(rows):
             item = ExtractedItem.model_validate(row)
             item_id = f"concept_{prefix}_{index}"
@@ -137,7 +164,9 @@ def extract_content(alignment: Alignment, extraction: PdfExtraction, segments: l
             elif not set(item.block_ids) <= {block.block_id for block in page.blocks}:
                 reason = "unknown_block_id"
             if reason:
-                result.validation.append(ValidationRecord(item_id=item_id, status="rejected", reason=reason))
+                diagnostic["rejected"] += 1
+                result.validation.append(ValidationRecord(item_id=item_id, status="rejected", reason=reason,
+                                          candidate=item))
                 continue
             item.type = checked_note_type(item.type, item.source_quote)
             start, end = timing
@@ -149,6 +178,7 @@ def extract_content(alignment: Alignment, extraction: PdfExtraction, segments: l
                              if segment.start < end and segment.end > start],
                 confidence=min((window.confidence for window in windows), default=0.0),
             ))
+            diagnostic["accepted"] += 1
             result.validation.append(ValidationRecord(item_id=item_id, status="accepted",
                                       reason="quote_and_number_checks_passed"))
     accepted = len(result.items)
@@ -159,6 +189,12 @@ def extract_content(alignment: Alignment, extraction: PdfExtraction, segments: l
         "extracted_item_retention": 1.0 if accepted else None,
         "lecture_semantic_coverage": None, "semantic_entailment_verified": False,
     }
+    result.telemetry["runtime_seconds"] = time.perf_counter() - started
+    events = result.telemetry["usage_events"]
+    for name in ("input_tokens", "output_tokens", "total_tokens"):
+        complete_usage = (len(events) == result.telemetry["provider_calls"] and bool(events)
+                          and all(event is not None and event.get(name) is not None for event in events))
+        result.telemetry[name] = sum(event[name] for event in events) if complete_usage else None
     return result
 
 

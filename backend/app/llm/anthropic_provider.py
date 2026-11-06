@@ -31,6 +31,13 @@ class AnthropicProvider(LLMProvider):
             ),
             policy=self.retry_policy,
         )
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "input_tokens", None)
+        output_tokens = getattr(usage, "output_tokens", None)
+        self.last_usage = {
+            "model": self.model, "input_tokens": input_tokens, "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens if input_tokens is not None and output_tokens is not None else None,
+        }
         return "".join(block.text for block in response.content if block.type == "text")
 
     def describe_images(self, prompt: str, images: list[bytes]) -> str:

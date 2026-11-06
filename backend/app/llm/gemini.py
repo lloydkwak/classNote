@@ -39,6 +39,13 @@ class GeminiProvider(LLMProvider):
                     ),
                     policy=self.retry_policy,
                 )
+                usage = getattr(response, "usage_metadata", None)
+                self.last_usage = {
+                    "model": model,
+                    "input_tokens": getattr(usage, "prompt_token_count", None),
+                    "output_tokens": getattr(usage, "candidates_token_count", None),
+                    "total_tokens": getattr(usage, "total_token_count", None),
+                }
                 return response.text or ""
             except QuotaExhausted:
                 if len(self._models) == 1:

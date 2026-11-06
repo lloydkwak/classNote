@@ -46,3 +46,14 @@ circle, bracket, arrow와 margin note만 사용한다. highlight/box/new action 
 - v2 evidence는 유지하지만 새 action planner로 완성된 것은 아니다.
 
 기존 데이터·키·캐시는 변경하지 않았다. 실제 강의 벤치마크는 저장 similarity만 읽는다.
+
+## Evaluation sprint
+
+평가 schema는 기존 Pydantic으로 정의하고 JSON Schema도 버전 관리한다. 별도 DB·UI
+framework·embedding 모델을 추가하지 않았다. 개발 API는 명시적 환경 변수로 켜며
+로컬 단일 프로세스에서 JSON revision을 저장한다. 사람이 확인하지 않은 legacy label은
+provisional로만 가져온다. CLI 지표는 라벨/예측 구간 교집합을 사용한다.
+
+lexical hybrid와 segment-boundary snapping은 평가 전용 옵션이다. 실강의 잠정 라벨에서
+current 대비 개선이 없어 production 정렬에 적용하지 않았다. provider SDK 응답의 사용량을
+기록하지만 cache hit에 과거 토큰을 신규 사용량으로 더하지 않고, 모르는 비용은 null로 둔다.

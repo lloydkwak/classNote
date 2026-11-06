@@ -41,6 +41,7 @@ class LLMProvider(ABC):
     name: str
     model: str
     retry_policy: RetryPolicy = DEFAULT_RETRY
+    last_usage: dict | None = None
 
     @abstractmethod
     def complete_json(self, prompt: str) -> str:
