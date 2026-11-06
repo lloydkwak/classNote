@@ -7,9 +7,9 @@ from pathlib import Path
 
 import numpy as np
 
-from app.cache import cached_json, hash_file
+from app.cache import cached_json, hash_file, read_cache
 from app.config import get_settings
-from app.models import Segment
+from app.models import Segment, SpokenWord
 from app.pipeline.audio import SAMPLE_RATE, split_audio
 from app.samples import mock_transcript
 
@@ -32,6 +32,7 @@ class STTProvider(ABC):
     name: str
     model: str
     needs_audio: bool = True
+    word_times: bool = False
 
     def prepare(self) -> None:
         """Do slow setup now, such as loading a model."""
@@ -51,6 +52,7 @@ def _load_whisper(model: str, device: str, compute_type: str, cpu_threads: int):
 
 class FasterWhisperProvider(STTProvider):
     name = "faster-whisper"
+    word_times = True
 
     def __init__(
         self,
@@ -89,9 +91,23 @@ class FasterWhisperProvider(STTProvider):
             vad_filter=True,
             # Stops one misheard phrase from repeating through the rest of the file.
             condition_on_previous_text=False,
+            word_timestamps=True,
         )
         return [
-            Segment(start=segment.start, end=segment.end, text=segment.text.strip())
+            Segment(
+                start=segment.start,
+                end=segment.end,
+                text=segment.text.strip(),
+                words=[
+                    SpokenWord(
+                        start=word.start,
+                        end=word.end,
+                        text=word.word.strip(),
+                        probability=word.probability,
+                    )
+                    for word in segment.words or []
+                ],
+            )
             for segment in segments
         ]
 
@@ -126,14 +142,10 @@ class OpenAIWhisperProvider(STTProvider):
         merged = []
         with tempfile.TemporaryDirectory() as directory:
             for chunk, offset in split_audio(audio, Path(directory), OPENAI_CHUNK_SECONDS):
-                for segment in self._transcribe_file(chunk, prompt, language):
-                    merged.append(
-                        Segment(
-                            start=segment.start + offset,
-                            end=segment.end + offset,
-                            text=segment.text,
-                        )
-                    )
+                merged += [
+                    segment.shifted(offset)
+                    for segment in self._transcribe_file(chunk, prompt, language)
+                ]
         return merged
 
 
@@ -189,7 +201,11 @@ def transcribe(
         return provider.transcribe(audio, prompt, settings.stt_language)
     if audio is None:
         raise ValueError(f"STT provider {provider.name!r} needs an audio file.")
-    key = [hash_file(audio), provider.name, provider.model, prompt, settings.stt_language]
+    plain_key = [hash_file(audio), provider.name, provider.model, prompt, settings.stt_language]
+    key = [*plain_key, "words"] if provider.word_times else plain_key
+    # A demo can't transcribe again, so a recording cached before word times still has to work.
+    if settings.demo_mode and read_cache("stt", key) is None and read_cache("stt", plain_key):
+        key = plain_key
     rows = cached_json(
         "stt",
         key,

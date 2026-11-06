@@ -5,6 +5,7 @@
 /data/
 /samples/*
 !/samples/.gitkeep
+!/samples/golden/
 
 # Python
 __pycache__/

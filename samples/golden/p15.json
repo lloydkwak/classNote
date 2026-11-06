@@ -1,0 +1,101 @@
+{
+  "page": 15,
+  "job": "lecture-v2",
+  "actions": [
+    {
+      "type": "highlight",
+      "target": {
+        "words": [
+          "p15_w21",
+          "p15_w22"
+        ]
+      },
+      "role": "key_term",
+      "importance": 4,
+      "quote": "당연히 오피머를 도장하지 않고",
+      "reason": "The professor says K-Means doesn't reach the optimum."
+    },
+    {
+      "type": "note",
+      "target": {
+        "words": [
+          "p15_w7",
+          "p15_w10"
+        ]
+      },
+      "role": "explanation",
+      "hint": "near",
+      "importance": 4,
+      "text": "애초에 정답이 없어서 optimum 보장 불가",
+      "quote": "애초에 정답이 없기 때문에 오피머를 정리할 수가 없어요.",
+      "reason": "The reason, which the slide doesn't give."
+    },
+    {
+      "type": "underline",
+      "target": {
+        "words": [
+          "p15_w28",
+          "p15_w32"
+        ]
+      },
+      "style": "single",
+      "importance": 5,
+      "quote": "처음에 랜덤 센터로이드가 어디가 답변되냐에 따라서 결과가 같이 다릅니다.",
+      "reason": "Stated directly about the initial centroids."
+    },
+    {
+      "type": "connect",
+      "source": {
+        "words": [
+          "p15_w45",
+          "p15_w46"
+        ]
+      },
+      "to": {
+        "words": [
+          "p15_w47",
+          "p15_w48"
+        ]
+      },
+      "label": "돌릴 때마다 다름",
+      "importance": 4,
+      "quote": "돌릴 때마다 결과가 달라요.",
+      "reason": "Points at the figure's two solutions, using OCR words."
+    },
+    {
+      "type": "note",
+      "target": {
+        "figure": "p15_b4"
+      },
+      "role": "example",
+      "hint": "near",
+      "importance": 3,
+      "text": "k 등 설정이 같아도 결과가 달라짐",
+      "quote": "케일도 똑같이 오로세팅을 했고 베이전, 워스터드도 바뀌지 않았는데 돌릴 때마다 결과가 달라요.",
+      "reason": "Why the figure's two solutions differ."
+    },
+    {
+      "type": "sticky",
+      "target": {
+        "words": [
+          "p15_w41",
+          "p15_w42"
+        ]
+      },
+      "role": "emphasis",
+      "importance": 5,
+      "text": "초기 centroid에 따라 결과 품질이 크게 달라짐!",
+      "quote": "이니셜 센터홀드가 뭐로 컨택되어 있느냐에 따라서 결과의 컨택이 많이 다를 수 있다.",
+      "reason": "Said three times in a row."
+    },
+    {
+      "type": "insert",
+      "after": "p15_w42",
+      "role": "explanation",
+      "importance": 3,
+      "text": "그냥 random X",
+      "quote": "그냥 랜섬으로 마무리하기로 할 게 아니라",
+      "reason": "The missing point of 'improving'."
+    }
+  ]
+}

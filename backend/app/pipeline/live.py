@@ -144,11 +144,7 @@ class LiveSession:
             chunk = self.folder / CHUNK_NAME
             _cut_wav(self.folder / DECODED_NAME, self._committed, chunk)
             new = [
-                Segment(
-                    start=segment.start + self._committed,
-                    end=segment.end + self._committed,
-                    text=segment.text,
-                )
+                segment.shifted(self._committed)
                 for segment in self._stt.transcribe(chunk, self._stt_prompt, self._language)
             ]
         return new, duration

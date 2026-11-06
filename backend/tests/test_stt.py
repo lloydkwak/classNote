@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.cache import CacheMissInDemoMode
-from app.models import Segment
+from app.models import Segment, SpokenWord
 from app.pipeline import stt
 
 
@@ -79,7 +79,11 @@ def fake_faster_whisper(monkeypatch):
 
         def transcribe(self, audio, **options):
             captured.update(options)
-            segment = SimpleNamespace(start=1.0, end=2.0, text=" 이 recursion이 멈춥니다 ")
+            words = [
+                SimpleNamespace(start=1.0, end=1.2, word=" 이", probability=0.9),
+                SimpleNamespace(start=1.2, end=1.8, word=" recursion이", probability=0.8),
+            ]
+            segment = SimpleNamespace(start=1.0, end=2.0, text=" 이 recursion이 멈춥니다 ", words=words)
             return iter([segment]), None
 
     monkeypatch.setattr("faster_whisper.WhisperModel", FakeWhisperModel)
@@ -93,7 +97,43 @@ def test_faster_whisper_auto_detects_language_per_segment_by_default(monkeypatch
     assert captured["language"] is None
     assert captured["multilingual"] is True
     assert captured["initial_prompt"] == "recursion"
-    assert segments == [Segment(start=1.0, end=2.0, text="이 recursion이 멈춥니다")]
+    assert [(s.start, s.end, s.text) for s in segments] == [(1.0, 2.0, "이 recursion이 멈춥니다")]
+
+
+def test_faster_whisper_keeps_word_times(monkeypatch, tmp_path):
+    captured = fake_faster_whisper(monkeypatch)
+    provider = stt.FasterWhisperProvider("small", "cpu", "int8")
+    words = provider.transcribe(tmp_path / "a.mp3", "", None)[0].words
+    assert captured["word_timestamps"] is True
+    assert [(w.start, w.end, w.text, w.probability) for w in words] == [
+        (1.0, 1.2, "이", 0.9),
+        (1.2, 1.8, "recursion이", 0.8),
+    ]
+
+
+def test_word_times_survive_the_cache(provider, audio):
+    provider.transcribe = lambda *args: [
+        Segment(start=0, end=1, text="hi", words=[SpokenWord(start=0, end=1, text="hi")])
+    ]
+    stt.transcribe(audio, [])
+    assert stt.transcribe(audio, [])[0].words[0].text == "hi"
+
+
+def test_turning_on_word_times_misses_an_older_cache(provider, audio):
+    stt.transcribe(audio, [])  # Cached under the older key, without word times.
+    provider.word_times = True
+    stt.transcribe(audio, [])
+    assert provider.calls == 2
+
+
+def test_demo_mode_falls_back_to_a_transcript_cached_before_word_times(
+    provider, audio, monkeypatch
+):
+    stt.transcribe(audio, [])
+    provider.word_times = True
+    monkeypatch.setenv("DEMO_MODE", "1")
+    assert stt.transcribe(audio, [])[0].text == "hello"
+    assert provider.calls == 1
 
 
 def test_faster_whisper_language_override(monkeypatch, tmp_path):

@@ -1,0 +1,87 @@
+{
+  "page": 16,
+  "job": "lecture-v2",
+  "actions": [
+    {
+      "type": "bracket",
+      "target": {
+        "lines": [
+          "p16_l0",
+          "p16_l2"
+        ]
+      },
+      "side": "left",
+      "importance": 3,
+      "quote": "내가 어느 정도 감이 있을 때 지정하는 것들도 있었고",
+      "reason": "He summarizes these three lines as one option."
+    },
+    {
+      "type": "note",
+      "target": {
+        "lines": [
+          "p16_l0",
+          "p16_l2"
+        ]
+      },
+      "role": "explanation",
+      "hint": "near",
+      "importance": 3,
+      "text": "대략 감이 있을 때 직접 지정",
+      "quote": "내가 어느 정도 감이 있을 때 지정하는 것들도 있었고",
+      "reason": "The condition, in his words."
+    },
+    {
+      "type": "underline",
+      "target": {
+        "words": [
+          "p16_w39",
+          "p16_w44"
+        ]
+      },
+      "style": "single",
+      "importance": 3,
+      "quote": "랜덤한 것을 여러 번 보여서",
+      "reason": "The second option he names."
+    },
+    {
+      "type": "highlight",
+      "target": {
+        "words": [
+          "p16_w103",
+          "p16_w103"
+        ]
+      },
+      "role": "key_term",
+      "importance": 5,
+      "quote": "그거를 확산에 붙여놓고 인워력 같은 것을 우리가 배달을 하게 됩니다.",
+      "reason": "The term this part of the talk is about."
+    },
+    {
+      "type": "note",
+      "target": {
+        "words": [
+          "p16_w107",
+          "p16_w116"
+        ]
+      },
+      "role": "explanation",
+      "hint": "near",
+      "importance": 5,
+      "text": "잘 된 clustering = 같은 cluster끼리 centroid에 최대한 모임",
+      "quote": "한 플러스터링 한 애들은 최대한 특수소이드에 모여있고",
+      "reason": "Why inertia measures quality, which the slide doesn't say."
+    },
+    {
+      "type": "circle",
+      "target": {
+        "words": [
+          "p16_w131",
+          "p16_w132"
+        ]
+      },
+      "importance": 4,
+      "quote": "그거를 확산에 붙여놓고 인워력 같은 것을 우리가 배달을 하게 됩니다.",
+      "reason": "The rule that picks the winning run."
+    }
+  ]
+}
