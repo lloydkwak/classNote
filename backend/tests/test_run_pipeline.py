@@ -29,6 +29,23 @@ def test_runs_from_pdf_and_mock_transcript_to_alignment(job_id):
     assert result["on_topic_dp_accuracy"] >= 0.7
 
 
+def test_evidence_step_only_runs_under_v2(job_id, monkeypatch):
+    folder = pipeline.job_dir(job_id)
+    pipeline.run_pipeline(job_id, to_step="evidence")
+    assert not (folder / "mentions.json").exists()
+    assert not pipeline._read_extraction(folder).pages[0].words
+
+    monkeypatch.setenv("ANNOTATION_ENGINE", "v2")
+    monkeypatch.setattr("app.pipeline.pdf_extract._load_ocr", lambda: None)
+    pipeline.run_pipeline(job_id, from_step="evidence", to_step="evidence")
+    pages = pipeline._read_extraction(folder).pages
+    assert all(page.words and page.lines for page in pages)
+    mentions = json.loads((folder / "mentions.json").read_text(encoding="utf-8"))
+    assert mentions
+    ids = {word.word_id for page in pages for word in page.words}
+    assert all(set(mention["word_ids"]) <= ids for mention in mentions)
+
+
 def test_korean_is_stored_as_readable_json(job_id):
     pipeline.run_pipeline(job_id, to_step="transcribe")
     text = (pipeline.job_dir(job_id) / "segments.json").read_text(encoding="utf-8")

@@ -10,7 +10,7 @@ Needs `uv`, Node.js, and `ffmpeg` on PATH (Windows: `winget install Gyan.FFmpeg`
 
 ```sh
 cp .env.example .env            # then set GEMINI_API_KEY
-cd backend && uv sync
+cd backend && uv sync              # add --extra ocr to read text inside images (ANNOTATION_ENGINE=v2)
 cd frontend && npm install
 ```
 
@@ -21,7 +21,7 @@ cd backend && uv run uvicorn app.main:app --reload    # http://127.0.0.1:8000
 cd frontend && npm run dev                            # http://localhost:5173
 
 # Pipeline from the CLI. --from-step and --to-step take:
-# extract, caption, transcribe, window, align, notes, consolidate, export
+# extract, caption, transcribe, window, align, evidence, notes, consolidate, export
 cd backend && uv run python scripts/run_pipeline.py --pdf slides.pdf --audio lecture.m4a
 cd backend && uv run python scripts/run_pipeline.py --job-id <id> --from-step align
 
@@ -63,6 +63,8 @@ PDF extraction → figure captions → audio conversion + STT → windowing → 
 - **One source of geometry:** `layout.py` computes every stroke, margin position, and wrapped line into each note's `sketch`. `ViewerScreen.tsx` and `export_pdf.py` only draw it, so change the look in `layout.py`, and keep the frontend's copy of the gutter ratio and note colors in sync.
 - **Live talks:** `live.py` handles audio as it's recorded: parts of one growing webm arrive at `/api/jobs/{id}/chunks`, and only new audio is transcribed. Decided windows are frozen and a span gets notes once it closes, so each span costs one LLM call and notes never change after they appear. The upload screen's presentation mode (`PresentScreen.tsx`) polls `annotations.json` and writes new notes onto the slides.
 - **Swappable providers:** STT and LLM sit behind interfaces, and the LLM is selected with `LLM_PROVIDER` and `LLM_MODEL`. Mock versions of both must let the full pipeline run without API keys.
+
+`ANNOTATION_V2.md` is the spec for the next engine, built behind `ANNOTATION_ENGINE=v2` until its evaluation beats v1. The `evidence` step only runs under v2: it adds word, line, and free-space geometry to `extraction.json` and writes `mentions.json`.
 
 ## Rules that span multiple modules
 

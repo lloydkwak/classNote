@@ -16,6 +16,26 @@ class Block(BaseModel):
     kind: Literal["text", "figure"] = "text"  # A figure's text is its generated caption.
 
 
+class Word(BaseModel):
+    """A word on the slide. Annotation actions point at these ids."""
+
+    word_id: str  # e.g. "p3_w17"
+    text: str
+    bbox: BBox
+    line_id: str  # e.g. "p3_l4"
+    block_id: str | None = None  # The enclosing block, if any.
+    source: Literal["pdf", "ocr"] = "pdf"
+
+
+class Line(BaseModel):
+    line_id: str
+    word_ids: list[str]
+    text: str
+    bbox: BBox
+    block_id: str | None = None
+    source: Literal["pdf", "ocr"] = "pdf"
+
+
 class Page(BaseModel):
     page: int
     title: str
@@ -23,6 +43,10 @@ class Page(BaseModel):
     low_text: bool = False
     width: float = 960  # In PDF points.
     height: float = 540
+    # Filled by add_geometry, for ANNOTATION_ENGINE=v2.
+    words: list[Word] = []
+    lines: list[Line] = []
+    free_rects: list[BBox] = []  # Empty rectangles on the slide, largest first. May overlap.
 
 
 class PdfExtraction(BaseModel):
@@ -30,10 +54,29 @@ class PdfExtraction(BaseModel):
     key_terms: list[str]
 
 
+class SpokenWord(BaseModel):
+    start: float
+    end: float
+    text: str
+    probability: float = 1.0
+
+
 class Segment(BaseModel):
     start: float
     end: float
     text: str
+    words: list[SpokenWord] = []  # Empty when the STT provider has no word times.
+
+    def shifted(self, seconds: float) -> "Segment":
+        return Segment(
+            start=self.start + seconds,
+            end=self.end + seconds,
+            text=self.text,
+            words=[
+                word.model_copy(update={"start": word.start + seconds, "end": word.end + seconds})
+                for word in self.words
+            ],
+        )
 
 
 class Window(BaseModel):
@@ -53,6 +96,17 @@ class AlignedWindow(Window):
 class Alignment(BaseModel):
     windows: list[AlignedWindow]
     pages: list[int]  # page number for each index of `similarities`
+
+
+class Mention(BaseModel):
+    """The professor said something that matches these words on the slide."""
+
+    page: int
+    word_ids: list[str]
+    time: float  # When the matching speech starts.
+    end: float
+    spoken_text: str
+    score: float  # 0-100.
 
 
 NoteType = Literal["explanation", "example", "emphasis", "exam_hint", "question"]

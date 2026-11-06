@@ -1,14 +1,21 @@
 """Extract per-page text blocks, titles, and key terms from a PDF."""
 
+import hashlib
+import logging
 import math
 import re
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
 import pymupdf
 
-from app.models import Block, Page, PdfExtraction
+from app.cache import read_cache, write_cache
+from app.models import BBox, Block, Line, Page, PdfExtraction, Word
+
+log = logging.getLogger(__name__)
 
 MIN_BLOCK_AREA = 0.0001  # fraction of the page
 LOW_TEXT_CHARS = 30
@@ -25,6 +32,23 @@ FRAME_MIN_TEXT_COVERAGE = 0.15
 MAX_FIGURES_PER_PAGE = 4
 DRAWING_CLUSTER_TOLERANCE = 24  # Points. Bars in a chart are separated by gaps.
 MIN_TERM_COUNT = 2
+BULLET_CHARS = frozenset("•◦▪▫●○■□▶►‣∙·-–—")
+OCR_ZOOM = 2.0
+OCR_MIN_SCORE = 0.6
+OCR_CACHE_VERSION = "korean-PP-OCRv5-mobile"
+# Free space, measured on a low-resolution render.
+FREE_SPACE_WIDTH = 240  # Cells across the page.
+FREE_SPACE_DILATE = 2  # Cells of clearance around ink.
+INK_TOLERANCE = 16  # Of 255, per color channel, from the page background.
+MIN_FREE_WIDTH = 0.1  # Of page width. Narrower than this can't hold a short note.
+MIN_FREE_HEIGHT = 0.05
+MAX_FREE_OVERLAP = 0.6  # Of the smaller rectangle. They may overlap: each is a choice.
+MAX_FREE_RECTS = 12
+# The marked page image.
+MARKED_ZOOM = 2.0
+MARK_FONT_SIZE = 7.0  # Points.
+MARK_LINE_COLOR = (0.75, 0.1, 0.1)
+MARK_FIGURE_COLOR = (0.1, 0.3, 0.75)
 
 PAGE_NUMBER = re.compile(r"^\W*(?:\w{1,5}\W*)?\d{1,4}(?:\W+\d{1,4})?\W*$")
 TERM = re.compile(r"[^\W\d_][\w+#-]+")
@@ -241,3 +265,335 @@ def extract_pdf(path: Path) -> PdfExtraction:
             )
         )
     return PdfExtraction(pages=pages, key_terms=_extract_key_terms(pages))
+
+
+# Everything below is for ANNOTATION_ENGINE=v2: the real things on a slide that an annotation
+# can point at, and the empty space a note can be written in.
+
+
+def _normalized(rect, width: float, height: float) -> BBox:
+    x0, y0, x1, y1 = rect
+    return (
+        max(0.0, x0 / width),
+        max(0.0, y0 / height),
+        min(1.0, x1 / width),
+        min(1.0, y1 / height),
+    )
+
+
+def _union(boxes: list[BBox]) -> BBox:
+    return (
+        min(box[0] for box in boxes),
+        min(box[1] for box in boxes),
+        max(box[2] for box in boxes),
+        max(box[3] for box in boxes),
+    )
+
+
+def _is_bullet(text: str) -> bool:
+    return all(char in BULLET_CHARS or 0xE000 <= ord(char) <= 0xF8FF for char in text)
+
+
+def _enclosing_block(box: BBox, blocks: list[Block]) -> Block | None:
+    """The smallest block holding the box's center."""
+    x, y = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    holding = [
+        block
+        for block in blocks
+        if block.bbox[0] <= x <= block.bbox[2] and block.bbox[1] <= y <= block.bbox[3]
+    ]
+    return min(
+        holding,
+        key=lambda block: (block.bbox[2] - block.bbox[0]) * (block.bbox[3] - block.bbox[1]),
+        default=None,
+    )
+
+
+def _append_line(page: Page, texts: list[str], boxes: list[BBox], block_id, source: str) -> None:
+    number = page.page
+    line_id = f"p{number}_l{len(page.lines)}"
+    start = len(page.words)
+    words = [
+        Word(
+            word_id=f"p{number}_w{start + index}",
+            text=text,
+            bbox=box,
+            line_id=line_id,
+            block_id=block_id,
+            source=source,
+        )
+        for index, (text, box) in enumerate(zip(texts, boxes))
+    ]
+    page.words += words
+    page.lines.append(
+        Line(
+            line_id=line_id,
+            word_ids=[word.word_id for word in words],
+            text=" ".join(texts),
+            bbox=_union(boxes),
+            block_id=block_id,
+            source=source,
+        )
+    )
+
+
+def _read_words(source: pymupdf.Page, page: Page) -> None:
+    """Add the PDF's words, skipping headers and footers, which extraction already dropped."""
+    text_blocks = [block for block in page.blocks if block.kind == "text"]
+    lines: dict[tuple[int, int], list[tuple[str, BBox, str]]] = {}
+    for x0, y0, x1, y1, text, block_number, line_number, _ in sorted(
+        source.get_text("words"), key=lambda word: (word[5], word[6], word[7])
+    ):
+        box = _normalized((x0, y0, x1, y1), page.width, page.height)
+        block = _enclosing_block(box, text_blocks)
+        if block is not None and not _is_bullet(text):
+            lines.setdefault((block_number, line_number), []).append((text, box, block.block_id))
+    for words in lines.values():
+        _append_line(page, [w[0] for w in words], [w[1] for w in words], words[0][2], "pdf")
+
+
+@lru_cache(maxsize=1)
+def _load_ocr():
+    """RapidOCR if it's installed (`uv sync --extra ocr`), otherwise None."""
+    try:
+        from rapidocr import LangRec, ModelType, OCRVersion, RapidOCR
+    except ImportError:
+        log.info("RapidOCR isn't installed, so text inside images is skipped.")
+        return None
+    # The Korean model reads Latin letters too, which code-switched slides need. PP-OCRv6, the
+    # default, has no Korean model.
+    return RapidOCR(
+        params={
+            "Rec.lang_type": LangRec.KOREAN,
+            "Rec.ocr_version": OCRVersion.PPOCRV5,
+            "Rec.model_type": ModelType.MOBILE,
+            "Global.log_level": "error",
+        }
+    )
+
+
+def _split_ocr_line(text: str, box: BBox) -> list[tuple[str, BBox]]:
+    """OCR gives a box per line, so divide it between the words by their length."""
+    words = text.split()
+    total = sum(len(word) for word in words) + len(words) - 1
+    x0, y0, x1, y1 = box
+    unit = (x1 - x0) / max(total, 1)
+    pieces = []
+    cursor = x0
+    for word in words:
+        end = cursor + unit * len(word)
+        pieces.append((word, (cursor, y0, end, y1)))
+        cursor = end + unit
+    return pieces
+
+
+def _ocr_lines(engine, png: bytes) -> list[tuple[list, str, float]]:
+    """Read one image, cached because a lecture takes minutes and reruns repeat the same images."""
+    key = [hashlib.sha256(png).hexdigest(), OCR_CACHE_VERSION]
+    cached = read_cache("ocr", key)
+    if cached is not None:
+        return cached
+    result = engine(png)
+    lines = []
+    if result is not None and result.boxes is not None:
+        lines = [
+            ([[float(x), float(y)] for x, y in corners], str(text), float(score))
+            for corners, text, score in zip(result.boxes, result.txts, result.scores)
+        ]
+    write_cache("ocr", key, lines)
+    return lines
+
+
+def _ocr_regions(source: pymupdf.Page, page: Page) -> list[pymupdf.Rect]:
+    if page.low_text:
+        return [source.rect]
+    images = [pymupdf.Rect(info["bbox"]) & source.rect for info in source.get_image_info()]
+    figures = [
+        pymupdf.Rect(
+            block.bbox[0] * page.width,
+            block.bbox[1] * page.height,
+            block.bbox[2] * page.width,
+            block.bbox[3] * page.height,
+        )
+        for block in page.blocks
+        if block.kind == "figure"
+    ]
+    # Logos and decorations were already filtered out of the figures.
+    return [
+        image
+        for image in images
+        if not image.is_empty and any(image.intersects(figure) for figure in figures)
+    ]
+
+
+def _read_ocr_words(source: pymupdf.Page, page: Page, engine) -> None:
+    figures = [block for block in page.blocks if block.kind == "figure"]
+    pdf_words = list(page.words)
+    for region in _ocr_regions(source, page):
+        picture = source.get_pixmap(matrix=pymupdf.Matrix(OCR_ZOOM, OCR_ZOOM), clip=region)
+        for corners, text, score in _ocr_lines(engine, picture.tobytes("png")):
+            if score < OCR_MIN_SCORE or not any(char.isalnum() for char in text):
+                continue
+            xs, ys = [point[0] for point in corners], [point[1] for point in corners]
+            box = _normalized(
+                (
+                    region.x0 + min(xs) / OCR_ZOOM,
+                    region.y0 + min(ys) / OCR_ZOOM,
+                    region.x0 + max(xs) / OCR_ZOOM,
+                    region.y0 + max(ys) / OCR_ZOOM,
+                ),
+                page.width,
+                page.height,
+            )
+            if _enclosing_word(box, pdf_words):  # A vector label on top of the image.
+                continue
+            pieces = _split_ocr_line(text, box)
+            figure = _enclosing_block(box, figures)
+            _append_line(
+                page,
+                [piece[0] for piece in pieces],
+                [piece[1] for piece in pieces],
+                figure.block_id if figure else None,
+                "ocr",
+            )
+
+
+def _enclosing_word(box: BBox, words: list[Word]) -> bool:
+    x, y = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    return any(
+        word.bbox[0] <= x <= word.bbox[2] and word.bbox[1] <= y <= word.bbox[3] for word in words
+    )
+
+
+def _ink_mask(source: pymupdf.Page, page: Page) -> np.ndarray:
+    """True where a note must not go: anything unlike the page background, words, and figures."""
+    zoom = FREE_SPACE_WIDTH / source.rect.width
+    picture = source.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), colorspace=pymupdf.csRGB, alpha=False)
+    pixels = np.frombuffer(picture.samples, dtype=np.uint8).reshape(picture.h, picture.w, 3)
+    quantized = (pixels // 8).astype(np.int32)
+    keys = quantized[..., 0] * 1024 + quantized[..., 1] * 32 + quantized[..., 2]
+    values, counts = np.unique(keys, return_counts=True)
+    common = keys == values[counts.argmax()]
+    background = np.median(pixels[common], axis=0)
+    ink = (np.abs(pixels.astype(np.int32) - background) > INK_TOLERANCE).any(axis=2)
+    height, width = ink.shape
+    occupied = [word.bbox for word in page.words]
+    occupied += [block.bbox for block in page.blocks if block.kind == "figure"]
+    for x0, y0, x1, y1 in occupied:
+        ink[int(y0 * height) : math.ceil(y1 * height), int(x0 * width) : math.ceil(x1 * width)] = True
+    return _dilated(ink, FREE_SPACE_DILATE)
+
+
+def _dilated(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Grow True cells by `radius` in every direction, and treat the page edge as filled."""
+    padded = np.pad(mask, radius, constant_values=True).astype(np.int32)
+    size = 2 * radius + 1
+    table = np.pad(padded.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
+    counts = table[size:, size:] - table[:-size, size:] - table[size:, :-size] + table[:-size, :-size]
+    return counts > 0
+
+
+def _maximal_rectangles(ink: np.ndarray) -> list[tuple[int, int, int, int]]:
+    """Every empty rectangle that can't grow in any direction, as (x0, y0, x1, y1) cells."""
+    height, width = ink.shape
+    heights = np.zeros(width + 1, dtype=np.int32)  # The extra 0 flushes the stack on each row.
+    found = []
+    for y in range(height):
+        heights[:width] = np.where(ink[y], 0, heights[:width] + 1)
+        stack: list[tuple[int, int]] = []  # (left edge, height), with growing heights.
+        for x, current in enumerate(heights.tolist()):
+            left = x
+            while stack and stack[-1][1] > current:
+                left, tall = stack.pop()
+                can_grow_down = y + 1 < height and not ink[y + 1, left:x].any()
+                if not can_grow_down:
+                    found.append((left, y + 1 - tall, x, y + 1))
+            if current and (not stack or stack[-1][1] < current):
+                stack.append((left, current))
+    return found
+
+
+def _overlap_ratio(a: BBox, b: BBox) -> float:
+    """Intersection over the smaller rectangle's area."""
+    width = min(a[2], b[2]) - max(a[0], b[0])
+    height = min(a[3], b[3]) - max(a[1], b[1])
+    if width <= 0 or height <= 0:
+        return 0.0
+    smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    return width * height / smaller
+
+
+def _free_rects(source: pymupdf.Page, page: Page) -> list[BBox]:
+    ink = _ink_mask(source, page)
+    cells_high, cells_wide = ink.shape
+    rects = [
+        (x0 / cells_wide, y0 / cells_high, x1 / cells_wide, y1 / cells_high)
+        for x0, y0, x1, y1 in _maximal_rectangles(ink)
+    ]
+    rects = [
+        rect
+        for rect in rects
+        if rect[2] - rect[0] >= MIN_FREE_WIDTH and rect[3] - rect[1] >= MIN_FREE_HEIGHT
+    ]
+    rects.sort(key=lambda rect: -(rect[2] - rect[0]) * (rect[3] - rect[1]))
+    kept: list[BBox] = []
+    for rect in rects:
+        if all(_overlap_ratio(rect, other) < MAX_FREE_OVERLAP for other in kept):
+            kept.append(rect)
+        if len(kept) == MAX_FREE_RECTS:
+            break
+    return kept
+
+
+def add_geometry(path: Path, extraction: PdfExtraction) -> None:
+    """Fill in each page's words, lines, and free space. Running it again starts over."""
+    engine = _load_ocr()
+    with pymupdf.open(path) as document:
+        for page, source in zip(extraction.pages, document):
+            page.words, page.lines = [], []
+            _read_words(source, page)
+            if engine is not None:
+                _read_ocr_words(source, page, engine)
+            page.free_rects = _free_rects(source, page)
+
+
+def render_marked_page(path: Path, page: Page, zoom: float = MARKED_ZOOM) -> bytes:
+    """A PNG of the page with a small tag on every line and figure, for the model to refer to.
+
+    Tags are the ids without the page prefix: "l4" is line p3_l4, and "b7" is figure p3_b7.
+    Word ids stay out of the image, which they would make unreadable.
+    """
+    with pymupdf.open(path) as document:
+        source = document[page.page - 1]
+        tags = [
+            (line.line_id.split("_")[1], line.bbox, False)
+            for line in page.lines
+        ] + [
+            (block.block_id.split("_")[1], block.bbox, True)
+            for block in page.blocks
+            if block.kind == "figure"
+        ]
+        for tag, box, is_figure in tags:
+            x, y = box[0] * page.width, box[1] * page.height
+            if is_figure:
+                source.draw_rect(
+                    pymupdf.Rect(x, y, box[2] * page.width, box[3] * page.height),
+                    color=MARK_FIGURE_COLOR,
+                    width=1,
+                )
+            width = pymupdf.get_text_length(tag, fontsize=MARK_FONT_SIZE) + 3
+            rect = pymupdf.Rect(x - width, y, x, y + MARK_FONT_SIZE + 2)
+            if is_figure:
+                rect = pymupdf.Rect(x, y, x + width, y + MARK_FONT_SIZE + 2)
+            elif rect.x0 < 0:
+                rect = pymupdf.Rect(0, y, width, y + MARK_FONT_SIZE + 2)
+            source.draw_rect(
+                rect,
+                color=None,
+                fill=MARK_FIGURE_COLOR if is_figure else MARK_LINE_COLOR,
+                overlay=True,
+            )
+            source.insert_text(
+                (rect.x0 + 1.5, rect.y1 - 2.5), tag, fontsize=MARK_FONT_SIZE, color=(1, 1, 1)
+            )
+        return source.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).tobytes("png")
