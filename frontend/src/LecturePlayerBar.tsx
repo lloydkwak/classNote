@@ -66,6 +66,7 @@ function Timeline(props: {
 
 /** Plays the page on screen or the whole lecture, and shows where the page was explained. */
 export function LecturePlayerBar(props: {
+  overview?: boolean
   page: number
   entry?: PageAudioEntry
   pageAudio: PageAudio | null
@@ -101,7 +102,7 @@ export function LecturePlayerBar(props: {
   return (
     <footer className="player">
       <div className="player-row">
-        <button
+        {!props.overview&&<button
           className="primary"
           disabled={ranges.length === 0}
           onClick={props.onPlayPage}
@@ -111,7 +112,7 @@ export function LecturePlayerBar(props: {
           {entry && entry.total_duration > 0 && (
             <span className="player-duration"> ({formatTime(entry.total_duration)})</span>
           )}
-        </button>
+        </button>}
         <button onClick={() => props.onPlayLecture()}>전체 강의 재생</button>
         {canResume && (
           <button onClick={() => props.onPlayLecture(props.savedTime)}>
@@ -148,7 +149,8 @@ export function LecturePlayerBar(props: {
         onSeek={props.onSeek}
       />
       <div className="player-ranges">
-        {props.pageAudio && ranges.length === 0 && (
+        {props.overview&&<span className="muted">전체 강의를 재생하거나 개요의 시간 링크를 선택하세요.</span>}
+        {!props.overview&&props.pageAudio && ranges.length === 0 && (
           <span className="muted">이 페이지에 매칭된 강의 구간이 없습니다.</span>
         )}
         {ranges.map((range, index) => {

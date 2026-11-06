@@ -35,7 +35,7 @@ class Settings:
     visual_grounding: bool = False
     vlm_python: Path = REPO_ROOT / ".venv-vlm/bin/python"
     vlm_timeout: float = 180
-    layout_engine: str = "v1"
+    layout_engine: str = "v2"
 
 
 def get_settings() -> Settings:
@@ -60,5 +60,5 @@ def get_settings() -> Settings:
         visual_grounding=os.environ.get("VISUAL_GROUNDING", "0") == "1",
         vlm_python=Path(os.environ.get("VLM_PYTHON") or REPO_ROOT / ".venv-vlm/bin/python"),
         vlm_timeout=float(os.environ.get("VLM_TIMEOUT_SECONDS", "180")),
-        layout_engine=os.environ.get("LAYOUT_ENGINE","v1"),
+        layout_engine=os.environ.get("LAYOUT_ENGINE","v2"),
     )

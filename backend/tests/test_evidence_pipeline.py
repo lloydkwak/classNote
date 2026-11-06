@@ -235,7 +235,7 @@ def test_export_matches_original_crop_rotation_and_registry(rotation,tmp_path,mo
     target=tmp_path/"out.pdf"
     export_annotated_pdf(source,Annotations(job_id="rotation",pages=[]),target)
     with pymupdf.open(target) as doc:
-        p=doc[0].get_pixmap(alpha=False)
+        p=doc[1].get_pixmap(alpha=False)
         image=np.frombuffer(p.samples,dtype=np.uint8).reshape(p.height,p.width,3)
         ys,xs=np.where((image[:,:,0]>220)&(image[:,:,1]<30)&(image[:,:,2]<30))
         actual=(xs.min()-gutter,ys.min(),xs.max()+1-gutter,ys.max()+1)
@@ -255,7 +255,7 @@ def test_export_matches_original_crop_rotation_and_registry(rotation,tmp_path,mo
     expected_strokes=annotations.pages[0].notes[0].sketch.strokes
     export_annotated_pdf(source,annotations,tmp_path/"grounded.pdf")
     with pymupdf.open(tmp_path/"grounded.pdf") as doc:
-        page=doc[0]
+        page=doc[1]
         ink=next(page.annots())
         assert json.loads(ink.info["content"])["provenance"]["target_element_id"]==native_word.id
         assert np.array(ink.vertices)==pytest.approx(

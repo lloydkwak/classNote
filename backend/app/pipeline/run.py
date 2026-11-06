@@ -259,7 +259,8 @@ def density_annotations(job_id: str, density: Density, layout: str | None = None
     folder = job_dir(job_id)
     content_path = folder / CONTENT_NAME
     if not content_path.exists():
-        return read_annotations(job_id)
+        from app.pipeline.overview import attach_overview
+        return attach_overview(folder,read_annotations(job_id))
     content = read_detailed_notes(job_id)
     extraction = _read_extraction(folder)
     layout=layout or get_settings().layout_engine
@@ -272,6 +273,8 @@ def density_annotations(job_id: str, density: Density, layout: str | None = None
     annotations = consolidate(notes, extraction, job_id, max_notes_per_page=len(notes),layout_engine=layout,ink_style=ink_style)
     annotations.incomplete = not content.complete
     annotations.planning = planning_report(content, annotations, density)
+    from app.pipeline.overview import attach_overview
+    attach_overview(folder,annotations,content)
     if manifest is not None:
         from app.pipeline.grounded_notes import save_graph
         save_graph(folder,content,_read_list(folder/SEGMENTS_NAME,Segment),_read_alignment(folder),
@@ -304,7 +307,7 @@ def export_density(job_id,density,output=None,layout=None,ink_style="natural"):
     annotations=density_annotations(job_id,density,layout,ink_style)
     import hashlib
     key=hashlib.sha256((hash_file(folder/PDF_NAME)+annotations.model_dump_json()
-                       +hash_file(Path(__file__).with_name("export_pdf.py"))+"export-v2").encode()).hexdigest()[:20]
+                       +hash_file(Path(__file__).with_name("export_pdf.py"))+hash_file(Path(__file__).with_name("overview.py"))+"export-v3-overview").encode()).hexdigest()[:20]
     target=output or folder/f"annotated-{density}-{key}.pdf"
     digest_path=target.with_suffix(".pdf.sha256")
     if (not target.exists() or not digest_path.exists()
@@ -316,8 +319,8 @@ def export_density(job_id,density,output=None,layout=None,ink_style="natural"):
         finally:
             temporary.unlink(missing_ok=True)
         _write_atomically(digest_path,hash_file(target))
-    content=read_detailed_notes(job_id)
-    if content.provenance.get("visual_grounding"):
+    content=read_detailed_notes(job_id) if (folder/CONTENT_NAME).exists() else None
+    if content is not None and content.provenance.get("visual_grounding"):
         from app.pipeline.grounded_notes import save_graph
         _,actions,manifest=_plan_notes(folder,content,density,allow_overflow=annotations.layout_engine=="v2")
         save_graph(folder,content,_read_list(folder/SEGMENTS_NAME,Segment),_read_alignment(folder),

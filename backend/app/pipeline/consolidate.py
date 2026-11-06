@@ -60,7 +60,7 @@ def consolidate(
                     text=note.note,
                     double=note.type == "exam_hint",
                     blocks=targets(note),
-                    mark=note.target_mark,
+                    mark=note.target_mark if layout_engine=="v2" or note.target_mark in {None,"underline","circle","bracket","none"} else "underline",
                     target_kind=note.provenance.target_kind if note.provenance else None,
                     rotation=page.rotation,
                 )
@@ -95,6 +95,7 @@ def consolidate(
                         end=note.end,
                         sketch=sketch,
                         provenance=note.provenance,
+                        action_reason=note.action_reason,
                     )
                     for note_id, note, sketch in zip(ids, chosen, sketches)
                 ],

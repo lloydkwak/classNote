@@ -131,7 +131,7 @@ def test_long_word_is_broken_inside_the_line_width():
 
 def test_only_symbols_missing_from_the_note_font_use_the_fallback():
     assert text_runs("이 recursion → x ≪ y ≈ z ★", "pretendard") == [
-        ("이 recursion → x ≪ y ≈ z ★", False)
+        ("이 recursion ", False), ("→ ", True), ("x ≪ y ≈ z ★", False)
     ]
     assert text_runs("a ∴ b", "pretendard") == [("a ", False), ("∴ ", True), ("b", False)]
     assert all(fallback_font().has_glyph(ord(char)) for char in "∴λ")

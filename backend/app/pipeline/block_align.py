@@ -123,6 +123,14 @@ def checked_note_type(note_type: str, quote: str) -> str:
 def has_unsupported_number(note: str, quote: str) -> bool:
     """Models add figures from the slide or from nowhere, which is easy to catch and costly."""
     said = set(NUMBER.findall(quote))
+    # Explicit spoken constants are the same values as 0/1 in a mathematical note.
+    # Do not parse decimals or compound quantities by accepting their component words.
+    for spelling,value in (("zero","0"),("one","1")):
+        for match in re.finditer(r"\b"+spelling+r"\b",quote,re.I):
+            before=quote[:match.start()].lower().rstrip()
+            after=quote[match.end():].lower().lstrip()
+            if not re.search(r"\bpoint$",before) and not re.match(r"(?:point|hundred|thousand|million|billion)\b",after):
+                said.add(value)
     return any(number not in said for number in NUMBER.findall(note))
 
 

@@ -1,5 +1,101 @@
 # Codex handoff — 2026-11-06
 
+## 최신 긴급 후속 인수 — Slide-first + Lecture Overview (2026-11-06)
+
+이 절이 아래 Phase E/D 역사보다 우선한다. 시작 HEAD는 `148e246` clean main이다.
+후속 구현/검증 완료 뒤 사용자가 commit을 요청하여 변경을 로컬 커밋으로 기록한다. push는 하지 않는다.
+`.env`, 모델/venv/기존 job은 보존했고 원본 job 파일 전부의 hash 불변을 확인했다.
+Qwen 모델을 다운로드하거나 backend/VLM 의존성을 sync하지 않았다.
+
+### 실제 구현
+
+- `grounded_notes.choose_action`: semantic type/importance/element kind → 다양한 native mark,
+  action selection_reason 및 provenance 유지. figure block은 세부 의미 확인이 아니므로
+  특정 z/w 수식을 그림에 단정 표시하지 않고 Detailed Notes 연결 안내를 렌더한다.
+- `local_request`: multi-step derivation의 마지막 문장을 verbatim selection_quote로 지정할 수 있음.
+  full source_quote/segment/time은 유지. source 안에 없는 focus 거절.
+- `grounding/document`: SymbolMT/Adobe Symbol의 명시적 Greek slot만 해석하며 raw_pdf_text 및
+  native geometry 보존. 분산된 equation은 동일 block/겹친 baseline의 **실제 glyph x좌표**로 결합.
+  일반 Latin/OCR을 Greek으로 바꾸지 않는다. registry fingerprint/mentions stale 검증 재사용.
+- `selection`: 의미 없는 common word 하나로 formula를 지지하지 않게 강화.
+  `som-selection-v9-source-focus`, `som-validation-v6-source-focus`.
+  prompt/target/focus/support/helper/schema/validation source 변경은 적절한 cache를 무효화한다.
+- `layout_v2`: `layout-v3-slide-first`, internal hard tier → margin fallback → bottom note band.
+  기본 LAYOUT_ENGINE=v2. 격리된 VLM의 API 기본 flag는 유지, UI 정밀 연결 체크는 기본 on.
+- `Page.protected_text_bboxes`: 모든 native word를 layout-only obstacle로 보호.
+  실제4페이지에서 추출 제외된 `=`, `0`, 괄호 등의 수식 조각과 메모가 겹치는 버그를 PNG에서
+  발견하여 수정했다. selectable registry를 임의 확장해서 해결하지 않았다.
+- 글꼴 ascender/descender로 text height/line_height/baseline_offset을 계산.
+  PDF TextWriter/SVG baseline 공유. math punctuation의 아이콘 slot 문제도 CJK fallback으로 수정.
+  64×64 배경 샘플로 dark 슬라이드 펜 대비 유지.
+- `overview.py`: 전체 validated content의 density-independent extractive Overview.
+  quote/segment/time/numeric inventory 검증, 7개 주제 cap, 명시적인 compression/omission IDs.
+  모든 export N+1장, PDF embedded map/TOC/page labels/graph export refs 추가.
+- source API pages1..N 유지, source_slide_index0..N-1, export_page_index1..N, Overview export0.
+  UI page0는 Overview sentinel이며 오디오 source page/time은 바꾸지 않는다.
+- `ViewerScreen`/`pageNavigation`: Overview 첫 화면/썸네일/주제 source/audio 링크,
+  기존 PDF/audio/density/style/download/live 호환. browser-check는 실제 새 render 응답을 기다린다.
+
+### 실제 산출물과 검증
+
+`data/slide-first-runs/real-reviewed/`: before.pdf(옛6개), after.pdf(새11개),
+same-evidence-baseline.pdf(동일11개/target/font의v1 layout+renderer),
+overview/slide3/4/5/6-preview.png, contact-sheet.png, annotations/actions/grounding/graph,
+action-metrics.json, page-mapping-tests.json, report.json, quality-report.md, frontend/스크린샷.
+원본 job은 `05a433631737`이고 실제11페이지/약4:45 강의/37segments다.
+지정된 `classNote.pdf`, `classNote (1).pdf` 이름은 repo에서 발견하지 못했다.
+
+저장된 후보를 기존 validator로 재검증했으며 새 STT/정렬/semantic 호출0이다.
+명시적 zero/one 숫자 표기로 기존6개→11개, 원래6개 content/quote/ID 보존.
+8B 최종fresh호출11, accepted9/ambiguous2, OOM/retry0, schema11/11.
+peak 장치7.23GiB, load9.762s, 평균inference2.647s, groundingstage45.084s.
+source model `Qwen/Qwen3-VL-8B-Instruct@0c351dd01ed87e9c1b53cbc748cba10e6187ff3b`.
+환경 torch2.6.0+cu124/transformers4.57.6/bnb0.49.0/accelerate1.12.0 유지.
+디버깅 전체누적71new+6cache, real-03은 GPU뒤 스크립트NameError 실패였음을 별도 기록했다.
+CPU --resume 재렌더의 previous_gpu_sampling/grounding_telemetry는 원래 GPU 측정이지 새 측정이 아니다.
+
+최종 내부메모11/11, 직접mark8 (bracket2/check2/highlight1/box1/underline2), connector7.
+실제circle0이며 circle PDF export는 synthetic contract test로 구분한다.
+full native/actual exported word bbox 충돌0, 페이지 밖0, 원본11→export12, audio5range 매핑 유지.
+backend474/frontend31/build 통과, Chromium7시나리오/pageerror0, 375/768/1280/1440 overflow0.
+실제 PyAV18.1.0/faster-whisper1.2.1 synthetic WAV decode560000 samples 확인.
+`data/slide-first-runs/synthetic-mock/`은 7개 mock production 통합 검증이며 실제 강의가 아니다.
+
+### 재실행
+
+```bash
+# 반드시 새로운 output 경로 사용, 원본 source job은 read-only
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/verify_slide_first.py \
+  --job data/jobs/05a433631737 --output data/slide-first-runs/new-run --gpu
+# 기존 생성 폴더의 layout/export만 갱신, VLM 실행 없음
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/verify_slide_first.py \
+  --job data/jobs/05a433631737 --output data/slide-first-runs/new-run --resume
+cd backend
+FFMPEG_PATH=/usr/bin/ffmpeg .venv/bin/python -m pytest -q
+cd ../frontend
+PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH npm test
+PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH npm run build
+```
+
+검증 서버는 8012 API/5178 UI, DATA_DIR=real-reviewed/state 복사본을 사용했다.
+검증용 신규 업로드는 STT/LLM/embedding mock이며 기존 실제 job/PDF/audio 조회는 실제다.
+실서비스 실행은 README의 mock override 없는 명령을 사용한다. 기존 다른 서버는 건드리지 않았다.
+브라우저 커맨드는 frontend/scripts/browser-check.mjs 및 품질 보고서 참조.
+
+### 남은 문제 / Phase F
+
+1. 페이지3/6 alignment 신뢰도 낮음/0: 정렬 개선을 주장하지 않는다. 별도 human gold가 먼저다.
+2. field 일반화 후보는 source_quote가 중간에서 잘려 unsupported_number로 계속 탈락.
+   candidate를 accepted로 바꾸지 말고 extraction의 quote 경계를 복구할 것.
+3. 그림 내부 w/γ/δ/원점/벡터 좌표와 의미는 미검증. 현재 generic Details 연결로 오표시 방지.
+4. circle은 안전 공간이 없으면 underline으로 대체/억제. 새 마커 수를 강제로 늘리지 말 것.
+5. 긴 connector 미관, semantic omission/grounding human gold, raster 텍스트 보호 평가가 남는다.
+6. 오프라인 PDF audio URL 링크 없음. PDF 내부 source goto와 UI audio seek는 구현됐다.
+7. 새 UI bundle size warning은 그대로다. 모델/driver/CUDA/AV 환경은 다시 구축하지 말 것.
+
+---
+
+
 ## 최신 Phase E 인수인계 (이 절 우선)
 
 - 시작 HEAD `8345a5f` clean main. Phase E 코드·테스트·문서는 사용자의 후속 요청에 따라 커밋했다. push는 수행하지 않았다.

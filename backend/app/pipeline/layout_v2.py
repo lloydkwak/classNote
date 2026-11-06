@@ -13,9 +13,9 @@ import pymupdf
 
 from app.models import Sketch, Word
 from app.grounding.document import build_registries, display_box
-from app.pipeline.layout import NOTE_FONTS, text_width, wrap_text
+from app.pipeline.layout import NOTE_FONTS, text_width, wrap_text,text_runs,load_note_font,fallback_font
 
-VERSION = "layout-v2.1"
+VERSION = "layout-v3-slide-first"
 STYLES = ("clean", "natural", "highlighter")
 
 
@@ -28,6 +28,22 @@ def enrich_geometry(pdf, extraction):
                            line_id=e.parent_ids[0] if e.parent_ids else "",source=e.source)
                       for e in registry.elements if e.kind in {"word","symbol"}
                       and e.recognition != "native_pdf_character"]
+    with pymupdf.open(pdf) as document:
+        for page,source in zip(extraction.pages,document):
+            # Semantic extraction intentionally removes recurring headers, page numbers,
+            # bullets and tiny math fragments. They still occupy the original slide.
+            # These are layout obstacles only; they never become selectable target IDs.
+            page.protected_text_bboxes=[]
+            for word in source.get_text("words"):
+                area=(pymupdf.Rect(word[:4])*source.rotation_matrix)&source.rect
+                if not area.is_empty:
+                    page.protected_text_bboxes.append((area.x0/source.rect.width,area.y0/source.rect.height,
+                                                       area.x1/source.rect.width,area.y1/source.rect.height))
+            pix=source.get_pixmap(matrix=pymupdf.Matrix(64/source.rect.width,64/source.rect.height),
+                                  colorspace=pymupdf.csRGB,alpha=False)
+            page.background_luma=[[sum(weight*pix.samples[(y*pix.width+x)*3+i]/255
+                                       for i,weight in enumerate((.2126,.7152,.0722)))
+                                   for x in range(pix.width)] for y in range(pix.height)]
 
 
 def rect(box,w,h):
@@ -119,6 +135,11 @@ def candidates(target,nw,nh,w,h,gutter,pad,free=()):
         area=rect(box,w,h)
         if area.width>=nw+2*pad and area.height>=nh+2*pad:
             choices.append(("free_space",area.x0+pad,area.y0+pad))
+    # The previous pipeline populated free_rects only in annotation-engine=v2. Always
+    # inspect native blank space too, so slide-first works for ordinary saved jobs.
+    for x in (pad,w*.18,w*.36,w*.54,w-nw-pad):
+        for y in range(int(h*.12),max(int(h*.12)+1,int(h-nh-pad)),max(12,int(h/18))):
+            choices.append(("slide_free_space",x,float(y)))
     return [(name,pymupdf.Rect(x,y,x+nw,y+nh)) for name,x,y in choices]
 
 
@@ -127,11 +148,13 @@ def make_mark(note,w,h,style,obstacles):
     target=_target(note,w,h)
     # A broad figure/block is not a verified point/vector/axis. Never draw a figure-wide circle.
     figure=(note.target_kind=="figure" or (note.target_kind is None and any(b.kind=="figure" for b in note.blocks))) and (target.width>w*.15 or target.height>h*.16)
-    if figure:
+    if figure or note.target_kind=="figure":
         return "none",[],target,"figure_detail_unverified"
+    if note.mark=="none": return "none",[],target,"explicitly_unmarked"
     rng=random.Random(note.id+":"+style)
     jitter=.25 if style=="natural" else 0.
     kind="circle" if note.mark=="circle" and target.width<w*.15 else "bracket" if note.mark=="bracket" else "underline"
+    if note.mark in {"highlight","box","check","arrow"}: kind=note.mark
     def underline_points():
         if note.rotation==90:
             return [(target.x0-3+rng.uniform(-jitter,jitter),target.y0+target.height*t/8) for t in range(9)]
@@ -145,6 +168,21 @@ def make_mark(note,w,h,style,obstacles):
         cx,cy=(target.x0+target.x1)/2,(target.y0+target.y1)/2
         points=[(cx+rx*math.cos(t*math.tau/48)+rng.uniform(-jitter,jitter),
                  cy+ry*math.sin(t*math.tau/48)+rng.uniform(-jitter,jitter)) for t in range(49)]
+    elif kind=="highlight":
+        if note.rotation in {90,270}:
+            inset=max(3,min(16,target.width*.65,target.height*.8))/2+.3
+            points=[((target.x0+target.x1)/2,target.y0+inset),((target.x0+target.x1)/2,target.y1-inset)]
+        else:
+            inset=max(3,min(16,target.height*.65,target.width*.8))/2+.3
+            points=[(target.x0+inset,(target.y0+target.y1)/2),(target.x1-inset,(target.y0+target.y1)/2)]
+    elif kind=="box":
+        box=expanded(target,2.5)
+        points=[(box.x0,box.y0),(box.x1,box.y0),(box.x1,box.y1),(box.x0,box.y1),(box.x0,box.y0)]
+    elif kind=="check":
+        points=[(target.x1+4,target.y1-4),(target.x1+7,target.y1-1),(target.x1+13,target.y1-10)]
+    elif kind=="arrow":
+        y=(target.y0+target.y1)/2;x=target.x0-4
+        points=[(x-15,y),(x,y),(x-4,y-3),(x,y),(x-4,y+3)]
     elif kind=="bracket":
         # Bracket stays on the original formula's leading edge after /Rotate.
         points={0:[(target.x0-1.5,target.y0-2),(target.x0-4,target.y0-2),(target.x0-4,target.y1+2),(target.x0-1.5,target.y1+2)],
@@ -153,14 +191,15 @@ def make_mark(note,w,h,style,obstacles):
                 270:[(target.x0-2,target.y1+1.5),(target.x0-2,target.y1+4),(target.x1+2,target.y1+4),(target.x1+2,target.y1+1.5)]}[note.rotation]
     else:
         points=underline_points()
-    pen=5.0 if style=="highlighter" else 1.3
+    pen=max(3,min(16,(target.width if note.rotation in {90,270} else target.height)*.65)) if kind=="highlight" else 5.0 if style=="highlighter" else 1.3
+    mark_obstacles=[o for o in obstacles if not (kind=="highlight" and expanded(target,.1).contains(o))]
     reason="native_target_mark"
     if kind=="circle" and not safe_path(points,obstacles,pen/2+.3):
         # A tight symbol inside a formula may have no room for a circle. Its native
         # glyph underline is precise and safer than crossing the neighbouring term.
         kind="underline";reason="circle_replaced_by_native_underline"
         points=underline_points()
-    if not safe_path(points,obstacles,pen/2+.3) or any(not(0<=x<=w and 0<=y<=h) for x,y in points):
+    if not safe_path(points,mark_obstacles,pen/2+.3) or any(not(pen/2<=x<=w-pen/2 and pen/2<=y<=h-pen/2) for x,y in points):
         return "none",[],target,"mark_suppressed_content_collision"
     return kind,[points],target,reason
 
@@ -180,35 +219,45 @@ class LayoutResult:
     metrics:dict
 
 
+def text_obstacles(page):
+    boxes=page.protected_text_bboxes or [word.bbox for word in page.words] or [b.bbox for b in page.blocks if b.kind=="text"]
+    return [rect(box,page.width,page.height) for box in boxes]
+
+
 def layout_page_v2(notes,page,font_name="pretendard",style="natural",max_route_nodes=3500):
     if style not in STYLES: raise ValueError("unsupported ink style")
     w,h=page.width,page.height; gutter=w*.33;pad=max(6,w*.012)
     font=w*NOTE_FONTS[font_name].size_ratio
     line_height=font*NOTE_FONTS[font_name].line_spacing
-    nw=gutter-2*pad
-    words=[rect(word.bbox,w,h) for word in page.words]
-    if not words: words=[rect(b.bbox,w,h) for b in page.blocks if b.kind=="text"]
+    nw=w*.24
+    words=text_obstacles(page)
     figures=[rect(b.bbox,w,h) for b in page.blocks if b.kind=="figure"]
     occupied=words+figures
     placed=[]; previous=[]; sketches=[];band_y=h+pad
     for note in notes:
         target=_target(note,w,h)
-        lines=wrap_text(note.text,nw,font,font_name);nh=len(lines)*line_height
+        fonts=[fallback_font() if fallback else load_note_font(font_name) for _,fallback in text_runs(note.text,font_name)] or [load_note_font(font_name)]
+        ascent=max(f.ascender for f in fonts);descent=max(0.,-min(f.descender for f in fonts))
+        baseline=max(font,ascent*font)
+        line_height=max(font*NOTE_FONTS[font_name].line_spacing,(ascent+descent)*font+1)
+        lines=wrap_text(note.text,nw,font,font_name)
+        nh=baseline+max(0,len(lines)-1)*line_height+descent*font
         options=[]
         for name,box in candidates(target,nw,nh,w,h,gutter,pad,page.free_rects):
             if box.x0< -gutter+pad or box.x1>w+gutter-pad or box.y0<pad or box.y1>h-pad: continue
             if any(intersects(expanded(box,2),r) for r in occupied+placed): continue
             distance=math.dist((box.x0+box.width/2,box.y0+box.height/2),
                                (target.x0+target.width/2,target.y0+target.height/2))
-            # Short routes near targets, with a small preference for quiet outer margins.
-            score=distance+(.8*w if "margin" not in name else 0)
-            options.append((score,name,box))
+            # Hard tier: use a safe original-slide candidate before ANY margin.
+            internal=box.x0>=0 and box.x1<=w
+            score=distance+box.height*.2
+            options.append((0 if internal else 1,score,name,box))
         if options:
-            _,name,box=min(options,key=lambda value:(value[0],value[1],tuple(value[2])))
+            _,_,name,box=min(options,key=lambda value:(value[0],value[1],value[2],tuple(value[3])))
         else:
             name="bottom_note_band"
             band_width=w+2*gutter-2*pad
-            lines=wrap_text(note.text,band_width,font,font_name);nh=len(lines)*line_height
+            lines=wrap_text(note.text,band_width,font,font_name);nh=baseline+max(0,len(lines)-1)*line_height+descent*font
             box=pymupdf.Rect(-gutter+pad,band_y,w+gutter-pad,band_y+nh)
             band_y=box.y1+pad
         placed.append(box)
@@ -220,7 +269,8 @@ def layout_page_v2(notes,page,font_name="pretendard",style="natural",max_route_n
             starts=[(box.x0-3,box.y0+line_height/2),(box.x1+3,box.y0+line_height/2)]
             pairs=sorted(((math.dist(s,e),s,e) for s in starts for e in points),key=lambda v:v[0])
             blockers=occupied+[b for b in placed[:-1]]
-            bounds=(-gutter+2,2,w+gutter-2,max(h,band_y)-2)
+            route_gutter=0 if box.x0>=0 and box.x1<=w else gutter
+            bounds=(-route_gutter+2,2,w+route_gutter-2,max(h,band_y)-2)
             for _,start,end in pairs:
                 if not(bounds[0]<=end[0]<=bounds[2] and bounds[1]<=end[1]<=bounds[3]): continue
                 shaft,reason=route(start,end,blockers+[box],previous,bounds,step=max(8,w/75),
@@ -237,17 +287,31 @@ def layout_page_v2(notes,page,font_name="pretendard",style="natural",max_route_n
             route_reason="figure_block_only_no_verified_subtarget"
         side="left" if box.x0<0 else "right"
         placement={"engine":VERSION,"status":"placed","reason":name,"fallback_mode":
-                   "expanded_note_band" if name=="bottom_note_band" else None,
+                   "expanded_note_band" if name=="bottom_note_band" else "expanded_margin" if "margin" in name else None,
                    "text_box":list(box),"anchor":list(anchor) if anchor is not None else None,
                    "target_bbox":list(anchor) if anchor is not None else None,
                    "anchor_point":list(control[-1]) if control else None,
                    "connector_control_points":control,"connector_reason":route_reason,"mark_reason":mark_reason,
-                   "collision_count":0,"overflow":name=="bottom_note_band"}
+                   "collision_count":0,"overflow":name=="bottom_note_band","baseline_offset":baseline}
+        def darkness(area):
+            if not page.background_luma or area.x0<0 or area.x1>w or area.y0>=h: return False
+            grid=page.background_luma;gy=min(len(grid)-1,max(0,int((area.y0+area.y1)/2/h*len(grid))))
+            gx=min(len(grid[gy])-1,max(0,int((area.x0+area.x1)/2/w*len(grid[gy]))))
+            cells=[grid[gy][gx]]
+            for x,y in ((area.x0,area.y0),(area.x1,area.y0),(area.x0,area.y1),(area.x1,area.y1)):
+                row=min(len(grid)-1,max(0,int(y/h*len(grid))))
+                col=min(len(grid[row])-1,max(0,int(x/w*len(grid[row]))))
+                cells.append(grid[row][col])
+            return sorted(cells)[len(cells)//2]<.35
+        text_color=[1.,.88,.42] if darkness(box) else [.11,.30,.65]
+        mark_color=[1.,.88,.42] if darkness(target) else [.11,.30,.65]
+        pen=max(3,min(16,(target.width if note.rotation in {90,270} else target.height)*.65)) if mark=="highlight" else 5 if style=="highlighter" else 1.3
         sketches.append(Sketch(mark=mark,strokes=strokes,arrow=arrow,side=side,x=box.x0,y=box.y0,
                                width=box.width,height=box.height,font_size=font,line_height=line_height,lines=lines,
-                               stroke_width=5 if style=="highlighter" else 1.3,
-                               stroke_opacity=.28 if style=="highlighter" else 1.,placement=placement))
+                               stroke_width=pen,text_color=text_color,mark_color=mark_color,
+                               stroke_opacity=.24 if mark=="highlight" else .28 if style=="highlighter" else 1.,placement=placement))
     output_height=max(h,band_y if band_y>h+pad else h)
+    gutter=gutter if any(b.x0<0 or b.x1>w for b in placed) else 0.
     metrics=evaluate(sketches,page,gutter,output_height)
     return LayoutResult(sketches,gutter,output_height,metrics)
 
@@ -255,27 +319,33 @@ def layout_page_v2(notes,page,font_name="pretendard",style="natural",max_route_n
 def evaluate(sketches,page,gutter=None,output_height=None):
     w,h=page.width,page.height;gutter=gutter if gutter is not None else w*.28
     output_height=output_height or h
-    words=[rect(word.bbox,w,h) for word in page.words] or [rect(b.bbox,w,h) for b in page.blocks if b.kind=="text"]
+    words=text_obstacles(page)
     figures=[rect(b.bbox,w,h) for b in page.blocks if b.kind=="figure"]
     boxes=[pymupdf.Rect(s.x,s.y,s.x+s.width,s.y+s.height) for s in sketches]
     paths=[s.arrow[0] if s.arrow else [] for s in sketches]
     overlap=sum(intersects(a,b) for i,a in enumerate(boxes) for b in boxes[i+1:])
     crossings=sum(any(crossing(a,b,c,d) for a,b in zip(p,p[1:]) for c,d in zip(q,q[1:]))
                   for i,p in enumerate(paths) for q in paths[i+1:])
-    ink=[(s,stroke) for s in sketches for stroke in s.strokes+s.arrow]
+    ink=[(s,stroke,s.stroke_width/2,False) for s in sketches for stroke in s.strokes]+[(s,stroke,.5,True) for s in sketches for stroke in s.arrow]
+    def intended_highlight(s,r):
+        target=s.placement.get("target_bbox")
+        return s.mark=="highlight" and s.stroke_opacity<=.3 and target is not None and expanded(pymupdf.Rect(target),.1).contains(r)
     captions=[word for word in words if any(f.y1-h*.05<=word.y0<=f.y1+h*.08 and word.x1>=f.x0 and word.x0<=f.x1 for f in figures)]
     return {"annotations":len(sketches),"annotation_placement_rate":1. if sketches else None,
             "original_text_occlusion_area":sum((b&r).get_area() for b in boxes for r in words if intersects(b,r)),
-            "formula_figure_occlusion_count":sum(any(segment_hits(a,b,f,s.stroke_width/2) for a,b in zip(p,p[1:]))
-                                                   for s,p in ink for f in figures),
+            "formula_figure_occlusion_count":sum(any(segment_hits(a,b,f,radius) for a,b in zip(p,p[1:]))
+                                                   for s,p,radius,connector in ink for f in figures),
             "annotation_box_overlap_count":overlap,"connector_intersection_count":crossings,
-            "ink_text_interference_count":sum(any(segment_hits(a,b,r,s.stroke_width/2) for a,b in zip(p,p[1:]))
-                                                for s,p in ink for r in words),
+            "ink_text_interference_count":sum(any(segment_hits(a,b,r,radius) for a,b in zip(p,p[1:]))
+                                                for s,p,radius,connector in ink for r in words if connector or not intended_highlight(s,r)),
             "connector_content_interference_count":sum(any(segment_hits(a,b,r,.5) for a,b in zip(p,p[1:]))
                                                         for p in paths for r in words),
-            "figure_caption_interference_count":sum(any(segment_hits(a,b,r,s.stroke_width/2) for a,b in zip(p,p[1:]))
-                                                     for s,p in ink for r in captions),
+            "figure_caption_interference_count":sum(any(segment_hits(a,b,r,radius) for a,b in zip(p,p[1:]))
+                                                     for s,p,radius,connector in ink for r in captions),
             "out_of_page_count":sum(b.x0< -gutter or b.x1>w+gutter or b.y0<0 or b.y1>output_height for b in boxes)
-                 +sum(any(x< -gutter or x>w+gutter or y<0 or y>output_height for x,y in p) for _,p in ink),
-            "overflow_to_margin_count":sum("margin" in s.placement.get("reason","") or s.placement.get("overflow",False) for s in sketches),
+                 +sum(any(x-radius< -gutter or x+radius>w+gutter or y-radius<0 or y+radius>output_height for x,y in p) for _,p,radius,_ in ink),
+            "overflow_to_margin_count":sum(b.x0<0 or b.x1>w or b.y0<0 or b.y1>h for b in boxes),
+            "intentional_translucent_highlight_contacts":sum(intended_highlight(s,r) for s,p,radius,connector in ink for r in words if not connector),
+            "original_slide_annotation_count":sum(0<=b.x0<b.x1<=w and 0<=b.y0<b.y1<=h for b in boxes),
+            "visual_action_count":sum(bool(s.strokes) for s in sketches),
             "connector_omitted_count":sum(bool(s.placement.get("anchor")) and not s.arrow for s in sketches)}

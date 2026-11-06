@@ -26,6 +26,8 @@ class Element(StrictModel):
     parent_ids: list[str] = []
     marker: str | None = None
     recognition: str = "native_pdf"
+    raw_pdf_text: str | None = None
+    font_encoding: str | None = None
 
     @model_validator(mode="after")
     def positive_box(self):
@@ -35,7 +37,7 @@ class Element(StrictModel):
 
 
 class ElementRegistry(StrictModel):
-    schema_version: str = "som-registry-v2-native-chars"
+    schema_version: str = "som-registry-v3-symbol-font-equations"
     pdf_sha256: str
     page: int = Field(ge=1)
     width: float = Field(gt=0)
@@ -86,6 +88,7 @@ class GroundingItem(StrictModel):
     page: int = Field(ge=1)
     content: str = Field(min_length=1)
     source_quote: str = Field(min_length=1)
+    selection_quote: str = ""  # Exact focus excerpt; full evidence/time remain unchanged.
     start: float = Field(ge=0)
     end: float
     segment_ids: list[int] = Field(min_length=1)

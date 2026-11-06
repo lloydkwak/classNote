@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 BBox = tuple[float, float, float, float]
+VisualMark = Literal["underline", "highlight", "box", "circle", "arrow", "bracket", "check", "none"]
 
 
 class Block(BaseModel):
@@ -37,6 +38,8 @@ class Line(BaseModel):
 
 
 class Page(BaseModel):
+    protected_text_bboxes: list[BBox] = []  # Layout-only: every native word, including extraction-filtered math/footer.
+    background_luma: list[list[float]] = []  # v2 native raster samples, never model-generated geometry.
     rotation: int = 0  # Original /Rotate; v2 enriches this without changing registry coordinates.
     page: int
     title: str
@@ -174,7 +177,8 @@ class Note(BaseModel):
     start: float
     end: float
     target_bboxes: list[BBox] | None = None  # Display-normalized registry geometry; never model coordinates.
-    target_mark: Literal["underline", "circle", "bracket", "none"] | None = None
+    target_mark: VisualMark | None = None
+    action_reason: str = ""
     provenance: AnnotationProvenance | None = None
 
 
@@ -188,7 +192,7 @@ class Sketch(BaseModel):
     gutters extend past it on both sides.
     """
 
-    mark: Literal["underline", "circle", "bracket", "none"]
+    mark: VisualMark
     strokes: list[list[Point]]  # The mark on the slide.
     arrow: list[list[Point]]  # From the margin note to the mark. Empty for page-level notes.
     side: Literal["left", "right"]
@@ -202,9 +206,12 @@ class Sketch(BaseModel):
     stroke_width: float = 1.6
     stroke_opacity: float = 1.0
     placement: dict = {}
+    text_color: list[float] | None = None
+    mark_color: list[float] | None = None
 
 
 class Annotation(BaseModel):
+    action_reason: str = ""
     content_id: str | None = None
     id: str
     block_ids: list[str]
@@ -230,6 +237,8 @@ class PageAnnotations(BaseModel):
 
 
 class Annotations(BaseModel):
+    overview: dict | None = None
+    page_mapping: list[dict] = []
     layout_engine: str = "v1"
     ink_style: str = "natural"
     title: str = ""

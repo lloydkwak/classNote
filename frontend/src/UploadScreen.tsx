@@ -25,7 +25,7 @@ function FileCard({ kind, file, onFile, onError }: { kind:'pdf'|'audio'; file:Fi
 export function UploadScreen({onDone}:{onDone:(id:string)=>void}) {
   const [pdf,setPdf]=useState<File|null>(null),[audio,setAudio]=useState<File|null>(null)
   const [density,setDensity]=useState<Density>(readPreference('classnote-density','balanced') as Density)
-  const [grounding,setGrounding]=useState(false),[live,setLive]=useState(false)
+  const [grounding,setGrounding]=useState(true),[live,setLive]=useState(false)
   const [error,setError]=useState<string|null>(null),[progress,setProgress]=useState<number|null>(null),[uploading,setUploading]=useState(false)
   const recent=readPreference('classnote-job','')
   const start=async()=>{

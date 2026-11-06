@@ -68,14 +68,14 @@ def inks(page):
 
 def test_every_page_is_kept_with_gutters_added(exported):
     with pymupdf.open(exported) as document:
-        assert len(document) == len(SLIDES)
-        assert document[1].rect.width == pytest.approx(WIDTH + 2 * gutter_width(WIDTH))
-        assert document[1].rect.height == pytest.approx(HEIGHT)
+        assert len(document) == len(SLIDES) + 1
+        assert document[2].rect.width == pytest.approx(WIDTH + 2 * gutter_width(WIDTH))
+        assert document[2].rect.height == pytest.approx(HEIGHT)
 
 
 def test_original_slide_text_stays_in_place(exported):
     with pymupdf.open(exported) as document:
-        found = document[1].search_for("Factorial and the Call Stack")
+        found = document[2].search_for("Factorial and the Call Stack")
         assert found
         assert found[0].x0 == pytest.approx(gutter_width(WIDTH) + 60, abs=3)
 
@@ -83,22 +83,22 @@ def test_original_slide_text_stays_in_place(exported):
 def test_marks_and_arrows_are_ink_only_on_annotated_pages(exported):
     with pymupdf.open(exported) as document:
         assert list(document[0].annots()) == []
-        kinds = {annot.type[1] for annot in document[1].annots()}
+        kinds = {annot.type[1] for annot in document[2].annots()}
         assert kinds == {"Ink"}
         # Two notes have a mark and an arrow. The page-level note has neither.
-        assert len(inks(document[1])) == 4
+        assert len(inks(document[2])) == 4
 
 
 def test_ink_uses_the_note_types_color(exported):
     with pymupdf.open(exported) as document:
-        colors = [annot.colors["stroke"] for annot in inks(document[1])]
+        colors = [annot.colors["stroke"] for annot in inks(document[2])]
     assert any(color == pytest.approx(COLORS["exam_hint"], abs=0.01) for color in colors)
     assert any(color == pytest.approx(COLORS["example"], abs=0.01) for color in colors)
 
 
 def test_korean_margin_notes_are_real_text_in_the_gutters(exported):
     with pymupdf.open(exported) as document:
-        page = document[1]
+        page = document[2]
         words = page.get_text("words")
         margin = [word for word in words if word[2] <= gutter_width(WIDTH)]
         text = " ".join(word[4] for word in margin)
@@ -109,7 +109,7 @@ def test_korean_margin_notes_are_real_text_in_the_gutters(exported):
 
 def test_note_font_is_embedded_as_a_subset(exported):
     with pymupdf.open(exported) as document:
-        fonts = document.get_page_fonts(1)
+        fonts = document.get_page_fonts(2)
         assert any("Pretendard" in font[3] for font in fonts)
     assert exported.stat().st_size < 3_000_000
 
@@ -126,7 +126,7 @@ def test_symbols_come_out_as_real_text_in_the_margin(tmp_path):
     output = tmp_path / "annotated.pdf"
     export_annotated_pdf(source, annotations, output)
     with pymupdf.open(output) as document:
-        page_text = " ".join(document[1].get_text().split())
+        page_text = " ".join(document[2].get_text().split())
     for symbol in ["≪", "→", "≈", "∴", "★", "빠름", "stack"]:
         assert symbol in page_text
 
@@ -140,12 +140,12 @@ def test_the_font_setting_is_honored(tmp_path, monkeypatch):
     output = tmp_path / "annotated.pdf"
     export_annotated_pdf(source, annotations, output)
     with pymupdf.open(output) as document:
-        assert any("Nanum" in font[3] for font in document.get_page_fonts(1))
+        assert any("Nanum" in font[3] for font in document.get_page_fonts(2))
 
 
 def test_figure_gets_a_circle_near_its_position(exported):
     with pymupdf.open(exported) as document:
-        page = document[1]
+        page = document[2]
         chart = next(
             annot
             for annot in inks(page)
@@ -173,5 +173,5 @@ def test_rotated_page_keeps_its_visual_orientation(tmp_path):
     output = tmp_path / "annotated.pdf"
     export_annotated_pdf(source, consolidate([], extraction, "job"), output)
     with pymupdf.open(output) as result:
-        assert result[0].rect.height == pytest.approx(800)
-        assert result[0].rect.width == pytest.approx(600 + 2 * gutter_width(600))
+        assert result[1].rect.height == pytest.approx(800)
+        assert result[1].rect.width == pytest.approx(600 + 2 * gutter_width(600))

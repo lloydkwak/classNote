@@ -1,5 +1,16 @@
 # classNote 프런트엔드 — Phase E
 
+## Overview navigation 후속 (2026-11-06)
+
+Workspace의 첫 화면/첫 썸네일은 Overview이며 원본 슬라이드1..N과 구분한다.
+UI page0는 Overview sentinel이고 source audio index로 사용하지 않는다. 개요 주제에서
+원본 슬라이드와 신뢰 가능한 오디오 시각으로 이동한다. 원본 비교 버튼은 Overview에서
+비활성화하고 전체 강의 재생은 유지한다. pageNavigation은 이 mapping과 낮은 신뢰도
+오디오 follow를 테스트한다. 기존3열/모바일 탭/밀도/다운로드/스타일/API는 보존한다.
+SlideSheet SVG와 PDF는 placement.baseline_offset과 같은 stroke geometry/색상을 공유한다.
+최종 화면: data/slide-first-runs/real-reviewed/frontend. Chromium7개 시나리오, 4개 폭을 검증했다.
+
+
 ## 참고와 독립 디자인
 
 [Previzion](https://previzion.site/)을 실제 Chromium으로 열어 확인했다. 큰 타이포그래피,

@@ -36,6 +36,11 @@ def build_loss_audit(folder,content,annotations):
             "reasons":dict(reasons),"extraction_unavailable":any(v.status=="unavailable" for v in validation),
             "grounding_reasons":dict(Counter(n.provenance.fallback_reason for n in rendered if n.provenance and n.provenance.fallback_reason)),
             "layout_statuses":dict(Counter(n.sketch.placement.get("status","legacy") for n in rendered))})
+        marked=[n for n in rendered if n.sketch.strokes or n.sketch.arrow]
+        result[-1]["visual_action_count"]=len(marked)
+        result[-1]["no_visual_action_reason"]=None if marked or not items else (
+            "targets_unconfirmed_or_figure_detail_unverified" if any(n.provenance for n in rendered) else "grounding_not_enabled")
+        result[-1]["mark_suppression_reasons"]=dict(Counter(n.sketch.placement.get("mark_reason","legacy_layout") for n in rendered if not n.sketch.strokes))
         result[-1]["stage_losses"]={
             "not_extracted":int(bool(windows) and not items and not validation),
             "failed_evidence_validation":sum(v.status=="rejected" for v in validation),

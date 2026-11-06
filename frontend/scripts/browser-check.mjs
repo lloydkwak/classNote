@@ -11,13 +11,13 @@ const browser=await chromium.launch({headless:true,args:['--no-sandbox']})
 const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'})
 const page=await context.newPage()
 const base=process.env.FRONTEND_URL??'http://127.0.0.1:5177'
-const job=process.env.TEST_JOB??'6c094c2fe7cc'
+const job=process.env.TEST_JOB??'05a433631737'
 const cases=[],errors=[]
 page.on('pageerror',error=>errors.push(error.message))
 const check=async(name,callback)=>{try{await callback();cases.push({name,status:'passed'})}catch(error){cases.push({name,status:'failed',error:error.message});console.error(name,error.message)}}
 const shot=name=>page.screenshot({path:path.join(root,name+'.png'),fullPage:true})
 const noOverflow=async()=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
-const waitWorkspace=async()=>{await page.waitForSelector('.workspace .stage canvas',{timeout:30000});await page.waitForSelector('.workspace .ink',{timeout:30000});await page.waitForFunction(()=>!document.querySelector('.render-status'))}
+const waitWorkspace=async()=>{await page.waitForSelector('.workspace .stage canvas',{timeout:30000});await page.waitForFunction(()=>document.querySelector('.canvas-caption')?.textContent?.startsWith('Lecture Overview'));await page.waitForFunction(()=>!document.querySelector('.render-status'))}
 
 try {
   await check('landing / responsive / accessible labels',async()=>{
@@ -41,6 +41,8 @@ try {
     await page.getByLabel('PDF 슬라이드 선택').setInputFiles(path.resolve('data/phase-d-runs/gpu-e2e-03/fixture/synthetic.pdf'))
     await page.getByLabel('강의 녹음 선택').setInputFiles(path.resolve('data/phase-d-runs/gpu-e2e-03/fixture/recording.wav'))
     assert.equal(await page.getByRole('button',{name:'AI 필기 생성하기',exact:true}).isEnabled(),true)
+    await page.getByText('필기 설정',{exact:true}).click()
+    await page.getByLabel('슬라이드 요소에 정밀하게 연결',{exact:false}).uncheck() // This upload test uses mock STT/semantics, never a GPU call.
     await page.route('**/api/jobs',r=>r.fulfill({status:500,contentType:'application/json',body:'{"detail":"private traceback"}'}))
     await page.getByRole('button',{name:'AI 필기 생성하기',exact:true}).click()
     await page.getByRole('alert').waitFor();assert.doesNotMatch(await page.locator('body').innerText(),/private traceback/)
@@ -67,18 +69,33 @@ try {
   })
   await check('actual lecture workspace / navigation / original / zoom / density / style / download',async()=>{
     await page.goto(base+'/#/jobs/'+job);await waitWorkspace()
+    await shot('overview-desktop')
+    assert.equal(await page.getByRole('button',{name:'Overview 열기',exact:true}).getAttribute('aria-current'),'page')
+    assert.equal(await page.getByRole('button',{name:'원본',exact:true}).isDisabled(),true)
+    await page.getByRole('button',{name:'다음 페이지',exact:true}).click()
+    await page.waitForFunction(()=>document.querySelector('.canvas-caption')?.textContent?.startsWith('1쪽'))
+    await page.getByRole('button',{name:'Overview 열기',exact:true}).click()
+    await page.waitForFunction(()=>document.querySelector('.canvas-caption')?.textContent?.startsWith('Lecture Overview'))
+    const overviewTimes=page.locator('.overview-topics button').filter({hasText:/▶/})
+    if(await overviewTimes.count()){
+      await overviewTimes.first().click()
+      await page.waitForFunction(()=>{const a=document.querySelector('audio');return a&&a.currentTime>70})
+      await page.waitForFunction(()=>document.querySelector('.canvas-caption')?.textContent?.startsWith('4쪽'))
+      await page.getByRole('button',{name:'일시정지',exact:true}).click()
+    }
+
     await page.getByRole('button',{name:'5쪽으로 이동',exact:true}).click()
     await page.waitForFunction(()=>document.querySelector('.canvas-caption')?.textContent?.startsWith('5쪽'))
     await page.getByRole('button',{name:'원본',exact:true}).click();assert.equal(await page.locator('.stage .ink').count(),0)
     await page.getByRole('button',{name:'AI 필기',exact:true}).click();await page.waitForSelector('.stage .ink')
     await page.getByRole('button',{name:'확대',exact:true}).click();await page.getByRole('button',{name:'120%',exact:true}).click()
-    await page.getByRole('button',{name:'자세하게',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.render-status'))
-    await page.getByLabel('펜 스타일').selectOption('clean');await page.waitForFunction(()=>!document.querySelector('.render-status'))
-    await page.getByLabel('펜 스타일').selectOption('natural');await page.waitForFunction(()=>!document.querySelector('.render-status'))
+    await Promise.all([page.waitForResponse(r=>r.url().includes('/annotations?')&&r.url().includes('density=detailed')&&r.status()===200),page.getByRole('button',{name:'자세하게',exact:true}).click()]);await page.waitForFunction(()=>!document.querySelector('.render-status'))
+    await Promise.all([page.waitForResponse(r=>r.url().includes('/annotations?')&&r.url().includes('ink_style=clean')&&r.status()===200),page.getByLabel('펜 스타일').selectOption('clean')]);await page.waitForFunction(()=>!document.querySelector('.render-status'))
+    await Promise.all([page.waitForResponse(r=>r.url().includes('/annotations?')&&r.url().includes('ink_style=natural')&&r.status()===200),page.getByLabel('펜 스타일').selectOption('natural')]);await page.waitForFunction(()=>!document.querySelector('.render-status'))
     const href=await page.getByRole('link',{name:'PDF 다운로드'}).getAttribute('href')
     const response=await context.request.get(base+href);assert.equal(response.status(),200)
     assert.equal((await response.body()).subarray(0,4).toString(),'%PDF')
-    assert.equal(await page.getByRole('button',{name:'필기 재생: Inverse of z = α + βj is -α - βj',exact:true}).count(),1)
+    assert.ok(await page.getByRole('button',{name:/필기 재생:/}).count()>0)
   })
   await check('actual audio seek / play / pause / source evidence',async()=>{
     await page.getByRole('button',{name:'전체 강의 재생',exact:true}).click()
@@ -89,14 +106,16 @@ try {
     await timeline.focus();await page.keyboard.press('End')
     await page.waitForFunction(()=>document.querySelector('audio')?.currentTime>250)
     await page.getByRole('button',{name:'4쪽으로 이동',exact:true}).click()
-    await page.waitForSelector('.source-status');assert.match(await page.locator('.source-status').innerText(),/근거 검증/)
+    await page.waitForSelector('.source-status');assert.match(await page.locator('.source-status').innerText(),/분석 내역/)
     await page.getByRole('button',{name:'6쪽으로 이동',exact:true}).click()
-    await page.waitForFunction(()=>document.querySelector('.source-status')?.textContent?.includes('추출을 완료하지 못했습니다'))
+    await page.waitForFunction(()=>document.querySelector('.source-status')?.textContent?.includes('연결 구간 확인'))
   })
   await check('workspace screenshots / responsive / canvas and SVG frames',async()=>{
     await page.getByRole('button',{name:'5쪽으로 이동',exact:true}).click()
     for(const width of [1440,1280,768,375]){
       await page.setViewportSize({width,height:1000});await noOverflow()
+      await page.waitForFunction(()=>!document.querySelector('.render-status')&&document.querySelector('.download')?.getAttribute('aria-disabled')==='false')
+      await page.evaluate(()=>document.fonts.ready)
       await page.waitForTimeout(200)
       await shot(width===1440?'result-desktop':width===375?'result-mobile':`result-${width}`)
       const dimensions=await page.evaluate(()=>{const s=document.querySelector('.stage .sheet').getBoundingClientRect();const v=document.querySelector('.stage svg.ink').getBoundingClientRect();return [s.width,s.height,v.width,v.height]})

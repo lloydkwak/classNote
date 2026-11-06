@@ -1,6 +1,7 @@
 """Production integration: content → bounded IPC → validated IDs → existing note/layout path."""
 
 import inspect
+import re
 import json
 import time
 import uuid
@@ -15,13 +16,26 @@ from app.grounding.document import build_registries, render_page, registry_finge
 from app.grounding.ipc import IsolatedVLMProvider, WorkerFailure
 from app.grounding.schema import ElementRegistry, GroundingItem, TargetRequest, TargetSelections
 from app.grounding.selection import (SELECTION_VERSION, SELECTION_SYSTEM, VALIDATION_VERSION,
-                                     selection_prompt, speech_error, validate_selection, literal_contains)
+                                     selection_prompt, speech_error, validate_selection, literal_contains,formula_supported,spoken_math_contains)
 from app.models import AnnotationProvenance, Mention, Segment
 from app.pipeline.rich_notes import plan_annotations
 from app.vlm.schema import MODEL_ID, MODEL_REVISION
 
 GROUNDING_NAME="grounding_results.json"
-ACTION_POLICY="grounded-actions-v2-layout-overflow"
+ACTION_POLICY="grounded-actions-v4-safe-figure-detail-link"
+
+
+def choose_action(item,element):
+    """Use existing semantic extraction, never a new summarization/coordinate call."""
+    if element.kind=="figure": return "none","figure_block_without_verified_subtarget"
+    if element.kind=="symbol": return "circle","native_symbol_role"
+    if item.type=="definition": return ("highlight" if item.importance>=4 else "underline"),"definition_term"
+    if item.type=="worked_example": return "check","spoken_worked_example_result"
+    if item.type in {"warning","exception","exam_hint","emphasis"}: return "highlight","source_emphasis_or_caution"
+    if item.type=="derivation": return "bracket","sequential_derivation_step"
+    if item.type=="reasoning" and element.kind=="formula": return "arrow","reasoning_formula_relation"
+    if element.kind=="formula": return "box","formula_meaning_explanation"
+    return "underline","source_explains_native_text"
 PROVIDER_FACTORY=IsolatedVLMProvider
 
 
@@ -38,7 +52,9 @@ def write_json(path,value):
 def inference_revision():
     root=Path(__file__).resolve().parents[1]
     return fingerprint({"model":MODEL_ID,"revision":MODEL_REVISION,"prompt":SELECTION_VERSION,
-                        "system":SELECTION_SYSTEM,"builder":inspect.getsource(selection_prompt),
+                        "system":SELECTION_SYSTEM,"builder":inspect.getsource(selection_prompt),"candidate_support":inspect.getsource(formula_supported),
+                        "math_aliases":inspect.getsource(spoken_math_contains),
+                        "target_policy":inspect.getsource(target_kind),"focus_policy":inspect.getsource(local_request),
                         "runtime":hash_file(root/"vlm/runtime.py"),
                         "schema":hash_file(root/"grounding/schema.py"),
                         "profile":"nf4-sdpa-524288-4096-512"})
@@ -51,7 +67,8 @@ def sources(folder,content):
     source["registry_builder"]=fingerprint([hash_file(Path(__file__).resolve().parents[1]/"grounding/document.py"),
                                             hash_file(Path(__file__).with_name("pdf_extract.py"))])
     source["inference"]=inference_revision()
-    source["validation"]=fingerprint([VALIDATION_VERSION,inspect.getsource(validate_selection),inspect.getsource(speech_error)])
+    source["validation"]=fingerprint([VALIDATION_VERSION,inspect.getsource(validate_selection),inspect.getsource(speech_error),
+                                          inspect.getsource(formula_supported),inspect.getsource(spoken_math_contains)])
     source["mentions"]=hash_file(folder/"mentions.json") if (folder/"mentions.json").exists() else "none"
     return source
 
@@ -65,6 +82,14 @@ def local_request(item,registry,viewport,image,segments,alignment,mentions=(),me
     # Keep absolute source IDs on ContentItem/graph; remap only the compact worker input.
     compact=[segments[i] for i in ids]
     grounding=GroundingItem.from_content_item(item,target_kind=target_kind(item,registry))
+    if item.type=="derivation" and grounding.target_kind=="formula":
+        # A multi-step proof is not one ambiguous target. Focus on its verbatim final
+        # statement, without inventing a new claim or changing the original evidence.
+        conclusion=re.split(r"(?<=[.!?])\s+(?=[A-Z가-힣])",item.source_quote.strip())[-1]
+        focus=grounding.model_copy(update={"selection_quote":conclusion})
+        eligible=[e for e in registry.elements if e.kind=="formula" and set(e.parent_ids)&set(item.block_ids)]
+        if conclusion!=item.source_quote and any(formula_supported(e,registry.elements,focus) for e in eligible):
+            grounding.selection_quote=conclusion
     grounding.segment_ids=list(range(len(ids)))
     windows=[w.model_dump(mode="json") for w in alignment.windows
              if w.start < item.end and w.end > item.start]
@@ -89,6 +114,9 @@ def target_kind(item,registry):
              and literal_contains(e.text,item.source_quote)}
     if len(matches)==1:
         return "symbol"
+    if item.type == "worked_example" and any(
+        e.kind=="formula" and set(e.parent_ids)&set(item.block_ids) for e in elements.values()):
+        return "formula"
     if item.type == "definition":
         return "word"
     return "any"
@@ -230,13 +258,18 @@ def plan_grounded(folder,content,extraction,density,allow_overflow=False):
             accepted=False
             decision=unavailable(item,"registry_hash_mismatch")
         mark="none"
+        selection_reason="unconfirmed_target_no_visual_mark"
         bbox=None
         if accepted:
-            mark="circle" if element.kind in {"symbol","figure"} else "bracket" if item.type in {"derivation","reasoning"} else "underline"
+            mark,selection_reason=choose_action(item,element)
             native=pymupdf.Rect(element.bbox)*pymupdf.Matrix(registry.width,registry.height)
             display=native*pymupdf.Matrix(registry.rotation_matrix)
             w,h=(registry.height,registry.width) if registry.rotation in {90,270} else (registry.width,registry.height)
             bbox=[display.x0/w,display.y0/h,display.x1/w,display.y1/h]
+        # A figure block association cannot verify its internal z/w/Greek labels.
+        # Keep the full claim in Detailed Notes; do not print an unverified formula
+        # next to a graph that may depict a different variable.
+        display_text=("그림 설명 → 상세 노트" if item.language=="ko" else "Figure explanation → Detailed Notes") if accepted and element.kind=="figure" else item.short_note
         evidence_id=stable_id("knowledge",folder.name,item.model_dump(mode="json"))
         decision_id=stable_id("grounding",evidence_id,manifest["fingerprint"],decision)
         action_id=stable_id("action",evidence_id,decision_id,ACTION_POLICY,density,item.short_note)
@@ -251,14 +284,17 @@ def plan_grounded(folder,content,extraction,density,allow_overflow=False):
                                 source_segment_ids=item.segment_ids,source_quote=item.source_quote,
                                 timestamp_range=(item.start,item.end),page=item.page,
                                 target_element_id=provenance.target_element_id,target_kind=provenance.target_kind,
-                                grounding_status=decision["status"],annotation_type=mark,annotation_text=item.short_note,
+                                grounding_status=decision["status"],annotation_type=mark,annotation_text=display_text,
+                                selection_reason=selection_reason,
                                 priority=item.importance,density=density,registry_fingerprint=provenance.registry_fingerprint,
                                 selected=item.id in selected,reason="planned" if item.id in selected else "density_threshold" if allow_overflow else "density_space_budget",
                                 provenance=provenance)
         actions.append(action)
         if item.id in selected:
             note=selected[item.id]
+            note.note=display_text
             note.provenance=provenance
+            note.action_reason=selection_reason
             if accepted:
                 note.target_bboxes=[tuple(bbox)]
                 note.target_mark=mark
@@ -275,7 +311,7 @@ def save_graph(folder,content,segments,alignment,actions,manifest,annotations,de
                           [a.action_id for a in actions],
                           [n.sketch.model_dump(mode="json") for p in annotations.pages for n in p.notes],
                           hash_file(root/"layout.py"),hash_file(root/"export_pdf.py")])
-    revision=fingerprint([revision,annotations.layout_engine,annotations.ink_style,
+    revision=fingerprint([revision,annotations.layout_engine,annotations.ink_style,annotations.overview,
                           hash_file(root/"layout_v2.py") if annotations.layout_engine=="v2" else None])
     saved_path=folder/f"evidence_graph-{density}.json"
     if export is None and saved_path.exists():
@@ -296,6 +332,9 @@ def save_graph(folder,content,segments,alignment,actions,manifest,annotations,de
                   {"job_id":folder.name,"sha256":hash_file(audio) if audio else None,"available":audio is not None,
                    "job_options":json.loads((folder/"job.json").read_text()) if (folder/"job.json").exists() else {}})
     segment_nodes={}
+    overview_id=None
+    if annotations.overview:
+        overview_id=node("lecture_overview",stable_id("overview",annotations.overview["fingerprint"]),annotations.overview)
     for index,segment in enumerate(segments):
         sid=node("speech_segment",stable_id("segment",folder.name,index,segment.model_dump(mode="json")),
                  {"source_segment_id":index,**segment.model_dump(mode="json")})
@@ -305,6 +344,8 @@ def save_graph(folder,content,segments,alignment,actions,manifest,annotations,de
     for action in actions:
         item=next(i for i in content.items if i.id==action.knowledge_id)
         kid=node("knowledge",action.evidence_id,{"knowledge_id":item.id,**item.model_dump(mode="json")})
+        if overview_id and item.id in annotations.overview["validated_knowledge_ids"]:
+            edge(kid,overview_id,"summarized_in")
         for index in item.segment_ids:
             if index not in segment_nodes:
                 raise ValueError("invalid graph segment reference")
@@ -329,7 +370,8 @@ def save_graph(folder,content,segments,alignment,actions,manifest,annotations,de
         if item.id in rendered:
             page,note=rendered[item.id]
             rid=node("rendered_annotation",stable_id("render",action.action_id,note.sketch.model_dump(mode="json")),
-                     {"annotation_id":note.id,"pdf_page":page.page,"density":density,
+                     {"annotation_id":note.id,"pdf_page":page.page+1,"source_page":page.page,
+                      "source_slide_index":page.page-1,"export_page_index":page.page,"density":density,
                       "sketch_sha256":fingerprint(note.sketch.model_dump(mode="json")),"export":export})
             edge(aid,rid,"rendered_as")
     counts=Counter(a.grounding_status for a in actions)

@@ -1,87 +1,107 @@
-# Phase E Layout v2 — 작업 계획과 검증 범위
+# Slide-first Layout v2 + Lecture Overview — 2026-11-06
 
-시작 HEAD `8345a5f`, clean main. 실제 회귀 강의 job `6c094c2fe7cc`를 확인했다:
-11페이지 PDF, m4a 원본/MP3, 37 STT segments, alignment/Rich Notes/grounding/기존 PDF 존재.
-원본 job은 수정하지 않고 `data/phase-e-runs/` 복사본에서 비교한다.
+현재 구현은 `layout-v3-slide-first`이며 `LAYOUT_ENGINE=v2`가 기본값이다.
+API `layout=v1|v2`, `ink_style=clean|natural|highlighter` 비교와 이전 job 호환을 유지한다.
+UI 업로드는 정밀 grounding을 기본 선택하며 사용자가 해제할 수 있다. API의 기존
+`visual_grounding` 기본값/실패 fallback은 유지한다. 모델은 `.venv-vlm`의 기존 SSD 8B NF4를 쓴다.
 
-Baseline backend432/frontend25 통과. PyAV18.1.0, faster-whisper1.2.1 보존.
-현재 검증된 지식은 3/5/7페이지 총4개다. 4페이지는 unsupported_number 2개 거절,
-6페이지는 의미 추출 ValueError unavailable이다. 페이지3 alignment confidence도 낮다.
-레이아웃 개선이 이 upstream 누락이나 의미 오류를 고쳤다고 주장하지 않는다.
+## 실제 연결
 
-구현 순서: 기존 action→선택적 Layout v2, occupied/free-space 후보, 안전한 mark/connector,
-확장 margin/bottom band, 공유 SVG/PDF geometry, style/density/render cache 분리,
-loss audit와 정렬 진단, React upload/progress/workspace 전면 개편, 실제 브라우저/PDF 비교.
-필기 내용·source ID·원본 파일을 보존하고 GPU/LLM을 레이아웃 때문에 호출하지 않는다.
+`ContentItem → GroundingItem → validated canonical ID → AnnotationAction → consolidate →
+layout_page_v2 → export_annotated_pdf → React SlideSheet`가 하나의 production 경로다.
+`choose_action`은 기존 semantic type/importance/element kind로 underline, highlight, box,
+circle, check, bracket, arrow를 선택하고 `selection_reason`을 남긴다. 별도 LLM은 호출하지 않는다.
+숫자/기호/중복 단어와 stale registry 검증을 유지한다. rejected/ambiguous/unmatched에
+확정 target을 부여하지 않는다. Renderer가 mark를 억제하면 mark_reason이 남는다.
 
-실제 결과/남은 한계는 구현·시각 검증 후 아래에 갱신한다.
+긴 derivation은 `local_request`가 발화의 마지막 문장을 정확히 복사한 `selection_quote`로
+선택 초점을 좁힐 수 있다. native 수식의 lexical evidence가 있을 때만 적용하며 원래
+source_quote, segment IDs, 시간은 유지한다. focus가 원문 부분 문자열이 아니면 거절한다.
 
-## 구현
+## 배치와 원본 보호
 
-`layout_v2.py`: `enrich_geometry`, `candidates`, `segment_hits`, `safe_path`, bounded `route`,
-`make_mark`, `layout_page_v2`, `evaluate`. PyMuPDF native registry/word geometry와 기존 free_rects를
-재사용한다. OCR import/download 및 GPU 호출은 없다. 원본 unrotated crop-local registry는
-기존 `display_box`를 통해 display-normalized geometry로 바꾼다.
+1. 검증된 native target에 직접 표시한다.
+2. target 근처/페이지 내부 free-space 후보를 거리 순으로 고른다.
+3. 내부에 안전한 후보가 없을 때만 기존 좌우 33% margin을 사용한다.
+4. margin도 부족하면 하단 note band를 늘린다. Detailed Notes를 자르지 않는다.
 
-기존 `density_annotations`/`consolidate`/`export_density`가 layout=v2일 때만 새 경로를 선택한다.
-`LAYOUT_ENGINE=v1`이 backend 기본이며 API query `layout=v1|v2`,
-`ink_style=clean|natural|highlighter`로 비교한다. 새 UI는 명시적으로 v2를 요청한다.
-기존 job에 detailed_notes가 없으면 기존 annotations를 그대로 반환한다.
+내부/외부 후보는 hard tier로 구분한다. 이전의 내부 0.8×width penalty는 제거했다.
+모든 메모가 내부에 들어가면 gutter는 0이며 원래 페이지 크기/비율/벡터를 보존한다.
 
-## 배치와 hard constraints
+중요한 수정: semantic extractor가 반복 header/footer/작은 수식 조각을 제외하더라도
+그 내용은 PDF에 남아 있다. `enrich_geometry`는 **모든 native PDF word bbox**를
+`Page.protected_text_bboxes`에 별도로 보존한다. 이 bbox는 배치 장애물이며 selectable
+canonical ID로 승격하지 않는다. 회전/crop은 source.rotation_matrix로 변환한다.
+기존 figure bbox, 다른 메모, stroke width/padding도 hard collision 검사에 사용한다.
 
-각 native target 근처 상하좌우, 기존 free-space, 양측 확장 margin 후보를 만든다.
-occupied native words와 figure 영역, 이전 annotation textbox를 padding 포함해 배제한다.
-배경색을 추측해 슬라이드 내부에 읽기 어려운 글을 배치하기보다 조용한 margin을 선호한다.
-후보 비용은 거리와 margin preference로 정렬하고 입력 순서/ID가 같으면 재현된다.
+텍스트는 실제 사용 글꼴의 ascender/descender로 높이와 line-height를 계산한다.
+`placement.baseline_offset`을 PDF TextWriter와 SVG가 공유한다. 이전 job은 font_size를
+baseline으로 쓰는 기존 값으로 fallback한다. 그리스 문자/괄호/화살표는 기존 CJK math
+fallback으로 보존하며, 아이콘처럼 렌더되는 Pretendard math slot을 사용하지 않는다.
+64×64 native 배경 밝기와 텍스트 영역 표본으로 어두운 슬라이드에는 밝은 노란 펜을 쓴다.
 
-입력 PDF width/height/비율은 유지하고 양쪽 gutter를 page width의33%로 확장한다.
-여백이 꽉 차거나 메모가 길면 하단 note band를 늘린다. 글꼴을 계속 줄이거나 text를 자르지 않는다.
-v2 planner는 density importance threshold는 유지하되 기존 physical-space budget으로
-고우선순위 item을 버리지 않는다(`allow_overflow=True`). v1 planner는 이전 정책을 유지한다.
-Action 정책 버전을 올렸고 VLM raw cache/knowledge는 재사용한다.
+Connector는 기존 직접 경로/8방향 bounded A*와 3500-node 예산을 재사용한다.
+안전한 경로가 없으면 생략 이유를 기록한다. 큰 figure circle은 생성하지 않는다.
+검증되지 않은 figure 내부 기호에 특정 수식을 표시하지 않으며 PDF에는
+`Figure explanation → Detailed Notes` 연결 안내를 남긴다. 원래 상세 설명/근거는 보존한다.
 
-Connector는 직접 경로를 먼저 검증하고, 막히면 8방향 A*를 쓴다. 앞선 connector와의 교차도
-피한다. 3500-node 예산, 8개 endpoint 후보로 작업량을 제한한다. safe grid entry가 없거나
-탐색 budget을 소진하면 connector를 생략하고 명시적 reason을 남긴다. 필기 text는 보존한다.
-OR-Tools/비결정적 solver는 설치하지 않았다. node-budget fallback을 테스트했다.
+## 렌더와 provenance
 
-symbol circle은 작고 검증된 native bbox에서만 생성한다. 다른 glyph와 부딪히면 해당 glyph의
-짧은 underline으로 바꾸고, 그것도 불가능하면 mark를 생략한다. 임의 좌표로 옮기지 않는다.
-figure block만 확인된 경우 큰 원이나 세부 vector/axis arrow를 그리지 않는다. 관련 강의 설명을
-margin에 두고 `figure_block_only_no_verified_subtarget`으로 connector 생략을 기록한다.
-PDF 안의 label 의미를 확인한 것처럼 보이지 않게 하며 canonical block provenance는 유지한다.
+`Sketch`는 final text_box, baseline_offset, stroke paths, connector control points,
+text_color/mark_color, opacity/width, placement/fallback reason을 갖는다.
+기존 annotation/action/knowledge/segment/target ID와 registry hash는 그대로 유지된다.
+Highlight는 opacity .24이며 실제 target 내부의 투명 강조 접촉은 불투명 occlusion과
+분리 집계한다. 둥근 stroke 끝이 옆 단어를 침범하지 않도록 endpoint를 안쪽으로 제한한다.
+connector의 실제 폭 1과 mark 폭을 각각 평가한다.
 
-## 렌더 계약
+## Lecture Overview와 페이지 계약
 
-`Sketch`: 기존 mark/strokes/arrow/text position/font/lines에 `stroke_width`,
-`stroke_opacity`, `placement`를 호환 가능한 optional/default 필드로 추가했다.
-placement에는 최종 text_box, target_bbox, anchor_point, connector_control_points,
-placement status/reason, connector/mark fallback, collision_count/overflow가 있다.
-knowledge/action/target IDs는 외부 Annotation.provenance에 그대로 남는다.
+모든 production export의 첫 물리 페이지는 Overview다. `include_overview=False`는
+내부 baseline 비교용 Python 인자이며 public API에는 노출하지 않는다.
+원본이 N장이면 기본 출력은 N+1장이다. 항상 original input.pdf에서 재export하므로 중복 삽입하지 않는다.
 
-`PageAnnotations.output_height`, gutter, layout_metrics가 확장 canvas를 정의한다.
-PDF는 원본 vector page를 원래 크기로 옮기고 같은 stroke 좌표를 gutter offset만 적용해 그린다.
-SVG도 같은 viewBox와 크기를 사용한다. density/font/style/layout은 export key와 graph render
-revision에 포함되며 STT/VLM 재분석을 하지 않는다. 원본 PDF는 쓰지 않는다.
+| 대상 | 기존 API source page | source_slide_index | export_page_index (0-based) |
+|---|---:|---:|---:|
+| Overview | 없음 | null | 0 |
+| 원본 슬라이드 1 | 1 | 0 | 1 |
+| 원본 슬라이드 3 | 3 | 2 | 3 |
 
-- Clean: 정돈된 stroke, 기존 설정 글꼴.
-- Natural: ID/스타일 seed로 약한 jitter, 기존 Nanum Pen, 수학은 별도 fallback.
-- Highlighter: 같은 geometry에 width5/opacity.28. 본문에 불투명 배경을 덮지 않는다.
+`Annotations.overview/page_mapping`, PDF embedded `classnote-page-map.json` 및
+Evidence Graph rendered node에 이 구분을 보존한다. source page audio는 이동하지 않는다.
+PDF page label은 Overview/1/2/…이며 원본 TOC는 물리 offset +1로 옮긴다.
 
-## 진단과 평가 범위
+`overview.py`는 density와 무관한 전체 validated Rich Notes를 추출식으로 묶는다.
+segment/quote/숫자/시간 근거를 재검증하며 새 사실/시험 힌트를 만들지 않는다.
+최대 7개 페이지 주제, 강의 흐름, 실제 short notes/공식을 1페이지로 구성한다.
+길면 완전한 short note 단위로 제한하고 presentation.compressed_knowledge_ids와
+omitted_overview_knowledge_ids를 기록한다. 수식을 중간에서 잘라 다른 식으로 만들지 않는다.
+전체 content는 JSON/상세 노트에 남는다. 근거가 없으면 insufficient_evidence 개요를 만든다.
 
-기존 annotation API의 `loss_audit`에 페이지별 audio ranges/confidence, STT/aligned counts,
-candidate/validated/grounded/planned/placed counts와 거절 이유를 담았다.
-grounded count는 density 선택 전의 지식 기준이다. `stage_losses`로 not_extracted,
-failed_evidence_validation, extraction_unavailable, grounding_rejected,
-not_selected_by_density, unplaced_by_layout, render_failed를 구분한다.
-PDF export 전의 render_failed는 null이며 `render_state`는 layout ready다.
-실제 PDF 성공은 evaluation report의 pdf_export_validity에서 별도로 확인한다.
+신뢰도 .3 미만 정렬에는 확정 시간 링크를 표시하지 않는다. 이 기준은 기계적 신호이며
+사람이 정렬을 검증했다는 뜻이 아니다. PDF의 슬라이드 링크는 내부 go-to, 실제 오디오
+seek는 UI Overview 시간 버튼을 사용한다. 오프라인 PDF의 오디오 URL은 구현하지 않았다.
 
-평가 수치는 native word/figure bbox에 대한 기하학적 지표다. 이미지 안에 래스터화된 글씨,
-없는 OCR 대상, semantic 정확도, 사람의 가독성은 자동 지표가 포괄하지 않는다.
-figure-caption 판단도 native caption box 근접 휴리스틱이다. 원래 강의 정렬을 바꾸지 않았다.
+## 캐시와 재현
 
-최종 산출물/실측/한계는 [annotation_quality_report.md](annotation_quality_report.md),
-기술 선정은 [phase_e_technology_decisions.md](phase_e_technology_decisions.md) 참고.
+PDF/registry/mentions/transcript/alignment/model/prompt/target/focus/validation fingerprints를
+구분한다. density/style/layout/overview/render 변경은 VLM을 다시 호출하지 않는다.
+새 focus 정책/schema 변경으로 이전 VLM 결과는 stale 처리하며 조용히 섞지 않는다.
+`export_density` key는 Overview renderer 소스도 포함한다. old annotations-only job은
+이전 geometry를 유지하며 안전한 Overview 및 page mapping을 추가한다.
+
+## 실행과 검증
+
+```bash
+# 실제 원본은 읽기 전용, 새 폴더에서 저장 후보 재검증 + 실제 SSD 8B
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/verify_slide_first.py \
+  --job data/jobs/05a433631737 --output data/slide-first-runs/new-run --gpu
+# 같은 산출물의 레이아웃/Overview만 갱신: 새 STT/LLM/VLM 호출 없음
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/verify_slide_first.py \
+  --job data/jobs/05a433631737 --output data/slide-first-runs/new-run --resume
+```
+
+실제 검토: `data/slide-first-runs/real-reviewed/{before,after,same-evidence-baseline}.pdf`,
+Overview/슬라이드3–6 PNG, contact-sheet, action-metrics, page-mapping-tests, quality-report.
+원본 raw words와 실제 **exported PDF note word bbox**의 충돌도 검사한다.
+이 검사는 raster text/semantic accuracy/사람 가독성을 모두 증명하지 않는다.
+실측과 한계는 [annotation_quality_report.md](annotation_quality_report.md) 참조.

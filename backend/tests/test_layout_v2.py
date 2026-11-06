@@ -80,7 +80,7 @@ def test_production_v2_export_density_api_and_provenance(grounded_job):
     for density in ("minimal","balanced","detailed"):
         file=pipeline.export_density(job,density,layout="v2",ink_style="clean")
         with pymupdf.open(file) as doc:
-            assert len(doc)==1 and doc[0].get_text()
+            assert len(doc)==2 and "LECTURE OVERVIEW" in " ".join(doc[0].get_text().split()) and doc[1].get_text()
             assert len(json.loads(doc.embfile_get("classnote-evidence.json"))["annotations"])==7
     with TestClient(app) as client:
         value=client.get(f"/api/jobs/{job}/annotations?layout=v2&ink_style=highlighter").json()
@@ -120,7 +120,7 @@ def test_cropped_rotated_v2_export_preserves_geometry(rotation,tmp_path):
         assert max(x for x,y in strokes[0])-min(x for x,y in strokes[0])<1
     output=tmp_path/"out.pdf";export_annotated_pdf(source,annotations,output)
     with pymupdf.open(output) as doc:
-        assert len(doc)==1 and "parameter" in doc[0].get_text()
+        assert len(doc)==2 and "parameter" in doc[1].get_text()
         assert annotations.pages[0].notes[0].bboxes==[box]
         assert annotations.pages[0].layout_metrics["out_of_page_count"]==0
     assert source.read_bytes()==before

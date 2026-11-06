@@ -192,9 +192,9 @@ def get_annotations(job_id: str, density: Density | None = None, layout: Literal
             return pipeline.density_annotations(job_id, density or "balanced",layout,ink_style)
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
-    return _serve(
-        job_id, pipeline.ANNOTATIONS_NAME, "application/json", "노트가 아직 준비되지 않았습니다."
-    )
+    if not (folder/pipeline.ANNOTATIONS_NAME).exists():
+        raise HTTPException(404,"노트가 아직 준비되지 않았습니다.")
+    return pipeline.density_annotations(job_id,density or "balanced",layout,ink_style)
 
 
 @router.get("/{job_id}/detailed-notes")
@@ -240,9 +240,9 @@ def get_annotated_pdf(job_id: str, density: Density | None = None, layout: Liter
         except ValueError as error:
             raise HTTPException(409,str(error)) from error
         return FileResponse(target, media_type="application/pdf")
-    if not (folder / EXPORT_NAME).exists() and (folder / pipeline.ANNOTATIONS_NAME).exists():
-        pipeline.export_job(job_id)
-    return _serve(job_id, EXPORT_NAME, "application/pdf", "annotated.pdf가 아직 준비되지 않았습니다.")
+    if not (folder/pipeline.ANNOTATIONS_NAME).exists():
+        raise HTTPException(404,"필기 PDF가 아직 준비되지 않았습니다.")
+    return FileResponse(pipeline.export_density(job_id,density or "balanced",layout=layout,ink_style=ink_style),media_type="application/pdf")
 
 
 @router.post("/{job_id}/retry", status_code=202)

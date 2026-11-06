@@ -97,6 +97,65 @@ def build_registries(path: Path, *, ocr=False) -> list[ElementRegistry]:
                                             bbox=word.bbox, text=word.text, source=word.source,
                                             parent_ids=[word.line_id] + ([word.block_id] if word.block_id else []),
                                             recognition="ocr_estimated_word_box" if word.source == "ocr" else "native_pdf"))
+                # Some PowerPoint PDFs encode Greek glyphs with Adobe Symbol's Latin slots.
+                # Decode only the explicitly named Symbol font, retain raw text, and use the
+                # exact native character boxes. Never apply Latin→Greek aliases to prose/OCR.
+                symbol_slots=str.maketrans({"a":"α","b":"β","g":"γ","d":"δ","q":"θ","l":"λ","m":"μ","s":"σ","w":"ω"})
+                mapped_words={}
+                native_characters=[]
+                for raw_block in source.get_text("rawdict")["blocks"]:
+                    for raw_line in raw_block.get("lines",[]):
+                        for span in raw_line["spans"]:
+                            symbol_font=span["font"].split("+")[-1] in {"SymbolMT","Symbol"}
+                            for char in span["chars"]:
+                                mapped=char["c"].translate(symbol_slots) if symbol_font else char["c"]
+                                char_box=pymupdf.Rect(char["bbox"])*pymupdf.Matrix(1/page.width,1/page.height)
+                                native_characters.append((char_box,mapped,char["c"]))
+                                if mapped==char["c"]: continue
+                                area=pymupdf.Rect(char["bbox"])
+                                center=pymupdf.Point((area.x0+area.x1)/2/page.width,(area.y0+area.y1)/2/page.height)
+                                parents=[e for e in elements if e.kind=="word" and pymupdf.Rect(e.bbox).contains(center)]
+                                if not parents: continue
+                                parent=min(parents,key=lambda e:pymupdf.Rect(e.bbox).get_area())
+                                mapped_words.setdefault(parent.id,[]).append((area.x0,char["c"],mapped))
+                for word in elements:
+                    if word.id not in mapped_words: continue
+                    word.raw_pdf_text=word.text;word.font_encoding="Adobe-Symbol"
+                    for _,raw,mapped in sorted(mapped_words[word.id]):word.text=word.text.replace(raw,mapped,1)
+                    word.kind="symbol" if SYMBOL.fullmatch(word.text) else "word"
+                    word.recognition="native_pdf_symbol_encoding"
+                for line in elements:
+                    if line.kind not in {"line","formula"}: continue
+                    children=[e for e in elements if line.id in e.parent_ids]
+                    if not any(e.raw_pdf_text is not None for e in children): continue
+                    line.raw_pdf_text=line.text
+                    line.text=" ".join(e.text for e in children)
+                    line.font_encoding="Adobe-Symbol";line.recognition="native_pdf_symbol_encoding"
+                # Math editors often store one visual equation as many PDF text lines. Group
+                # only overlapping native word baselines within the SAME original block.
+                for block in page.blocks:
+                    children=[e for e in elements if block.block_id in e.parent_ids and e.kind in {"word","symbol"}]
+                    rows=[]
+                    for word in sorted(children,key=lambda e:(e.bbox[1],e.bbox[0])):
+                        box=pymupdf.Rect(word.bbox)
+                        row=next((r for r in rows if min(r[1].y1,box.y1)-max(r[1].y0,box.y0)>.55*min(r[1].height,box.height)),None)
+                        if row is None:rows.append(([word],box))
+                        else:row[0].append(word);row[1].include_rect(box)
+                    for number,(members,box) in enumerate(rows):
+                        line_ids={p for e in members for p in e.parent_ids if "_l" in p}
+                        text=" ".join(e.text for e in sorted(members,key=lambda e:e.bbox[0]))
+                        if len(line_ids)<2 or not FORMULA.search(text) or not re.search(r"[\wα-ωΑ-Ω]",text):continue
+                        chars=[(area,mapped,raw) for area,mapped,raw in native_characters
+                               if not mapped.isspace() and box.contains(pymupdf.Point((area.x0+area.x1)/2,(area.y0+area.y1)/2))]
+                        # Sort actual glyph positions, not whole PDF spans like "−= −" whose
+                        # text order interleaves with other math spans on the same baseline.
+                        chars.sort(key=lambda value:value[0].x0)
+                        text=" ".join(mapped for _,mapped,_ in chars)
+                        identity=f"{block.block_id}_equation{number}"
+                        elements.append(Element(id=identity,page=page.page,kind="formula",bbox=tuple(box),text=text,
+                                                source="pdf",parent_ids=[block.block_id],recognition="assembled_native_equation",
+                                                raw_pdf_text=" ".join(raw for _,_,raw in chars)))
+                        for word in members:word.parent_ids.append(identity)
                 # Native character boxes allow ∇ inside the compound token '∇L'. Never split
                 # an OCR word proportionally and pretend its symbol position is PDF geometry.
                 native_words = [e for e in elements if e.kind == "word" and e.source == "pdf"]
@@ -118,12 +177,13 @@ def build_registries(path: Path, *, ocr=False) -> list[ElementRegistry]:
                                 parent = min(parents,key=lambda e:pymupdf.Rect(e.bbox).get_area())
                                 index = char_indices.get(parent.id,0)
                                 char_indices[parent.id] = index+1
-                                if not SYMBOL.fullmatch(char["c"]):
+                                decoded=char["c"].translate(symbol_slots) if span["font"].split("+")[-1] in {"SymbolMT","Symbol"} else char["c"]
+                                if not SYMBOL.fullmatch(decoded):
                                     continue
                                 elements.append(Element(id=f"{parent.id}_c{index}",page=page.page,kind="symbol",
                                                         bbox=(rect.x0/page.width,rect.y0/page.height,
                                                               rect.x1/page.width,rect.y1/page.height),
-                                                        text=char["c"],source="pdf",
+                                                        text=decoded,source="pdf",raw_pdf_text=char["c"] if decoded!=char["c"] else None,
                                                         parent_ids=[parent.id,*parent.parent_ids],
                                                         recognition="native_pdf_character"))
                 # The old extractor deliberately ignores page-sized image backgrounds. Keep real

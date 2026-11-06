@@ -22,26 +22,7 @@ import { Brand,DensityControl,Icon,readPreference,savePreference } from './ui'
 import { Document,Page } from 'react-pdf'
 import { PDF_OPTIONS } from './SlideSheet'
 
-/** The page being explained at this time. Off-topic moments stay on the page before them. */
-function pageAtTime(pageAudio: PageAudio, time: number) {
-  let latest: { page: number; start: number } | null = null
-  for (const entry of pageAudio.pages) {
-    for (const range of entry.audio_ranges) {
-      if (range.start <= time && time < range.end && range.confidence>=.3 && (!latest || range.start > latest.start)) {
-        latest = { page: entry.page, start: range.start }
-      }
-    }
-  }
-  return latest?.page ?? null
-}
-
-function pageAtFirstSpeech(pageAudio: PageAudio) {
-  const heard = pageAudio.pages.filter((entry) => entry.primary_start !== null)
-  if (heard.length === 0) return null
-  return heard.reduce((first, entry) =>
-    (entry.primary_start as number) < (first.primary_start as number) ? entry : first,
-  ).page
-}
+import {clampPage,exportPdfPageNumber,pageAtTime} from './pageNavigation'
 
 export function ViewerScreen({ jobId }: { jobId: string }) {
   const [annotations, setAnnotations] = useState<Annotations | null>(null)
@@ -62,7 +43,8 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
   const [densityError, setDensityError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pageCount, setPageCount] = useState(0)
-  const [page, setPage] = useState(1)
+  // UI 0 is Overview, while source API pages remain 1..N (source_slide_index=page-1).
+  const [page, setPage] = useState(0)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hasAudio, setHasAudio] = useState(true)
   const [follow, setFollow] = useState(true)
@@ -97,16 +79,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
   useEffect(() => {
     // Slides and audio work without notes, and notes work without page audio.
     let cancelled = false
-    void Promise.allSettled([getAnnotations(jobId), getPageAudio(jobId)]).then(([notes, audio]) => {
-      if (cancelled) return
-      if (audio.status === 'fulfilled') setPageAudio(audio.value)
-      // Open where the lecture starts, not on a title slide that may never be discussed.
-      const heard = audio.status === 'fulfilled' ? audio.value : null
-      const first = heard ? pageAtFirstSpeech(heard) : null
-      const noted = notes.status === 'fulfilled' ? notes.value.pages[0]?.page : undefined
-      const opening = first ?? noted
-      if (opening) setPage(opening)
-    })
+    void getPageAudio(jobId).then(value=>{if(!cancelled)setPageAudio(value)}).catch(()=>{})
     return () => { cancelled = true }
   }, [jobId])
 
@@ -134,7 +107,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
   const goToPage = (next: number) => {
     // Choosing a page by hand means stopping following, or the next tick would undo it.
     setFollow(false)
-    setPage(Math.min(Math.max(next, 1), pageCount || 1))
+    setPage(clampPage(next,pageCount))
   }
 
   // While listening to one page, the listener is free to look at others.
@@ -168,7 +141,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
       }
       if (event.key === 'ArrowLeft') {
         setFollow(false)
-        setPage((value) => Math.max(value - 1, 1))
+        setPage((value) => Math.max(value - 1, 0))
       }
     }
     window.addEventListener('keydown', onKey)
@@ -185,16 +158,20 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
         </div>
       </header>
       <nav className="workspace-mobile-tabs" aria-label="작업공간 패널">{[['slide','슬라이드'],['pages','페이지'],['notes','상세 노트']].map(([key,label])=><button key={key} aria-pressed={mobileTab===key} onClick={()=>setMobileTab(key)}>{label}</button>)}</nav>
-      <aside className="thumbnail-pane"><div className="rail-title">슬라이드 <span>{pageCount}</span></div><Document file={pdfUrl(jobId)} options={PDF_OPTIONS} loading={<p className="muted">미리보기 준비 중…</p>}>
+      <aside className="thumbnail-pane"><div className="rail-title">개요 · 슬라이드 <span>{pageCount}</span></div>
+        <button className={`thumbnail ${page===0?'current':''}`} aria-label="Overview 열기" aria-current={page===0?'page':undefined} onClick={()=>{goToPage(0);setMobileTab('slide')}}>
+          <span className="thumbnail-page"><Document file={annotatedPdfUrl(jobId,density,layout,inkStyle)} options={PDF_OPTIONS}><Page pageNumber={1} width={112} renderTextLayer={false} renderAnnotationLayer={false}/></Document></span><span><b>Overview</b><small>강의 전체 개요</small></span>
+        </button>
+        <Document file={pdfUrl(jobId)} options={PDF_OPTIONS} onLoadSuccess={d=>setPageCount(d.numPages)} loading={<p className="muted">미리보기 준비 중…</p>}>
         {Array.from({length:pageCount},(_,i)=>i+1).map(number=><button key={number} className={`thumbnail ${page===number?'current':''}`} aria-label={`${number}쪽으로 이동`} aria-current={page===number?'page':undefined} onClick={()=>{goToPage(number);setMobileTab('slide')}}><span className="thumbnail-page"><Page pageNumber={number} width={112} renderTextLayer={false} renderAnnotationLayer={false} loading=""/></span><span><b>{String(number).padStart(2,'0')}</b><small>{annotatedPages.has(number)?'필기 있음':'슬라이드'}</small></span></button>)}
       </Document></aside>
-      <section className="slide-pane"><div className="canvas-toolbar"><div className="segmented"><button aria-pressed={!original} onClick={()=>setOriginal(false)}>AI 필기</button><button aria-pressed={original} onClick={()=>setOriginal(true)}>원본</button></div>
+      <section className="slide-pane"><div className="canvas-toolbar"><div className="segmented"><button aria-pressed={!original} onClick={()=>setOriginal(false)}>AI 필기</button><button disabled={page===0} aria-pressed={original} onClick={()=>setOriginal(true)}>원본</button></div>
         <div className="pager">
-          <button aria-label="이전 페이지" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
+          <button aria-label="이전 페이지" disabled={page <= 0} onClick={() => goToPage(page - 1)}>
             ‹
           </button>
           <span>
-            {page} / {pageCount || '…'}
+            {page===0?'Overview':`슬라이드 ${page}`} / {pageCount || '…'}
           </span>
           <button
             aria-label="다음 페이지"
@@ -233,7 +210,8 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
       {busy&&<p className="render-status" role="status"><span className="activity-dot"/> 필기 배치를 준비하고 있어요…</p>}
       {densityError&&<div role="alert" className="error-box">{densityError}<button onClick={()=>setReload(v=>v+1)}>다시 불러오기</button></div>}
         <div className="mobile-density"><DensityControl value={density} onChange={setDensity} disabled={!detailed||busy}/></div>
-        <SlideSheet
+        {page===0?<SlideSheet file={annotatedPdfUrl(jobId,density,layout,inkStyle)} page={exportPdfPageNumber(0)} original zoom={zoom}
+          onPageCount={()=>{}} onError={setError}/>:<SlideSheet
           file={pdfUrl(jobId)}
           page={page}
           annotations={original?undefined:pageAnnotations}
@@ -246,7 +224,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
           onPlayNote={playNote}
           onPageCount={setPageCount}
           onError={setError}
-        />
+        />}
         <nav className="page-dots" aria-label="페이지">
           {Array.from({ length: pageCount }, (_, index) => index + 1).map((number) => {
             const hasNotes = annotatedPages.has(number)
@@ -264,11 +242,19 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
             )
           })}
         </nav>
-        <p className="canvas-caption">{page}쪽 · {original?'원본 슬라이드':'필기를 누르면 연결된 강의를 재생합니다.'}</p>
+        <p className="canvas-caption">{page===0?'Lecture Overview · 원본 슬라이드 번호와 오디오 연결은 유지됩니다.':`${page}쪽 · ${original?'원본 슬라이드':'필기를 누르면 연결된 강의를 재생합니다.'}`}</p>
       </section>
 
       {showNotes && (
         <aside className="notes-pane">
+          {page===0&&<section className="overview-topics"><span className="eyebrow">LECTURE OVERVIEW</span><h2>{annotations?.overview?.title??'강의 전체 개요'}</h2>
+            {annotations?.overview?.entries.map(entry=><article key={entry.source_slide_index}><h4>{entry.title}</h4><p>{entry.text}</p>
+              <button onClick={()=>goToPage(entry.source_page)}>원본 슬라이드 {entry.source_page} 보기</button>{' '}
+              {hasAudio&&entry.audio_verified?<button onClick={()=>{goToPage(entry.source_page);player.playLecture(entry.start)}}>▶ {formatTime(entry.start)}–{formatTime(entry.end)}</button>:<p className="muted">오디오/페이지 연결 확인 필요</p>}
+            </article>)}
+            {annotations?.overview?.status==='insufficient_evidence'&&<p>요약을 확정할 발화 근거가 충분하지 않습니다. 원본 슬라이드와 오디오를 먼저 확인해 주세요.</p>}
+          </section>}
+          <div hidden={page===0}>
           <div className="notes-heading"><span className="eyebrow">YOUR LECTURE NOTES</span><h2>{page}쪽의 핵심 설명</h2></div>
           {annotations?.loss_audit?.filter(a=>a.page===page).map(a=><div className="source-status" key={a.page}>
             {a.alignment_uncertain&&<p className="uncertain">페이지와 음성의 연결을 확인해 주세요. 이 구간의 정렬 확신이 낮습니다.</p>}
@@ -338,7 +324,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
                     {note.provenance && (
                       <p className="muted">
                         {note.provenance.grounding_status === 'accepted'
-                          ? '슬라이드의 연결 위치가 확인된 필기입니다.'
+                          ? note.provenance.target_kind==='figure'?'그림 영역과 연결되었습니다. 그림 내부 기호와 의미는 추가 확인이 필요합니다.':'슬라이드의 연결 위치가 확인된 필기입니다.'
                           : '정확한 슬라이드 위치는 확인되지 않았습니다. 발화 근거를 함께 확인해 주세요.'}
                       </p>
                     )}
@@ -347,12 +333,13 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
               </li>
             ))}
           </ul>
-        </aside>
+          </div></aside>
       )}
 
       <audio ref={audioRef} preload="metadata" src={audioUrl(jobId)} onError={() => setHasAudio(false)} />
       {hasAudio ? (
         <LecturePlayerBar
+          overview={page===0}
           page={page}
           entry={pageEntry}
           pageAudio={pageAudio}

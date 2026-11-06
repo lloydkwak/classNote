@@ -4,10 +4,12 @@ type Point = [number, number]
 
 /** How to draw a note by hand, in PDF points. annotated.pdf draws the same data. */
 export interface Sketch {
+  text_color?: number[] | null
+  mark_color?: number[] | null
   stroke_width?: number
   stroke_opacity?: number
-  placement?: { status: string; reason: string; fallback_mode?: string | null }
-  mark: 'underline' | 'circle' | 'bracket' | 'none'
+  placement?: { status: string; reason: string; fallback_mode?: string | null; baseline_offset?:number }
+  mark: 'underline' | 'highlight' | 'box' | 'circle' | 'arrow' | 'bracket' | 'check' | 'none'
   strokes: Point[][]
   arrow: Point[][]
   side: 'left' | 'right'
@@ -55,6 +57,11 @@ export interface PageAnnotations {
 }
 
 export interface Annotations {
+  overview?: {
+    title: string;status: string;validated_knowledge_ids:string[]
+    entries: {source_page:number;source_slide_index:number;export_page_index:number;title:string;text:string;start:number;end:number;audio_verified:boolean;knowledge_ids:string[]}[]
+  } | null
+  page_mapping?: {kind:'overview'|'slide';source_slide_index:number|null;source_page:number|null;export_page_index:number}[]
   layout_engine?: 'v1' | 'v2'
   ink_style?: InkStyle
   title?: string

@@ -9,8 +9,18 @@ from app.grounding.document import registry_fingerprint
 from app.grounding.schema import TargetRequest, TargetSelections
 from app.pipeline.block_align import quote_in_transcript
 
-SELECTION_VERSION = "som-selection-v4-empty-figure-text"
-VALIDATION_VERSION = "som-validation-v2-unique-mentions"
+SELECTION_VERSION = "som-selection-v9-source-focus"
+VALIDATION_VERSION = "som-validation-v6-source-focus"
+
+SPOKEN_GREEK={"α":"alpha","β":"beta","γ":"gamma","δ":"delta","θ":"theta","λ":"lambda","μ":"mu","σ":"sigma","ω":"omega"}
+
+
+def spoken_math_contains(symbol, text):
+    """Only exact, named Greek constants; never infer a position, sign, or unknown glyph."""
+    if re.fullmatch(r"[α-ωΑ-Ω]",symbol):
+        exact=re.search(r"(?<!\w)"+re.escape(symbol)+r"(?!\w)",unicodedata.normalize("NFKC",text)) is not None
+        return exact or (symbol in SPOKEN_GREEK and literal_contains(SPOKEN_GREEK[symbol],text))
+    return literal_contains(symbol,text)
 SELECTION_SYSTEM = (
     "You are a JSON API. Your entire response is one JSON OBJECT with the root key selections. "
     "Never use Markdown, backticks, explanations, or a top-level array. "
@@ -29,6 +39,8 @@ def literal_contains(needle, text):
 
 
 def speech_error(item, segments):
+    if item.selection_quote and item.selection_quote not in item.source_quote:
+        return "focus_quote_not_in_source"
     if any(index < 0 or index >= len(segments) for index in item.segment_ids):
         return "invalid_segment_id"
     referenced = [segments[i] for i in item.segment_ids]
@@ -56,6 +68,20 @@ def speech_error(item, segments):
     return None
 
 
+
+FORMULA_STOPWORDS=frozenset("a an the is are was were be been that this these those so and or if then thus assume given found we you it its of to in on for by with have has do does now".split())
+
+
+def formula_supported(target,elements,item):
+    quote=getattr(item,"selection_quote","") or item.source_quote
+    if literal_contains(target.text,quote): return True
+    for child in elements:
+        if target.id not in child.parent_ids: continue
+        value=child.text.strip(".,:;()[]")
+        if (child.kind=="symbol" or (len(value)>1 and value.casefold() not in FORMULA_STOPWORDS)) and spoken_math_contains(value,quote):
+            return True
+    return False
+
 def selection_prompt(request: TargetRequest):
     visible = set(request.viewport.visible_element_ids)
     elements = [e for e in request.registry.elements if e.id in visible and e.kind != "block"]
@@ -64,18 +90,24 @@ def selection_prompt(request: TargetRequest):
         block_ok = not item.block_ids or e.id in item.block_ids or bool(set(e.parent_ids) & set(item.block_ids))
         mention = request.mentions_registry_hash == registry_fingerprint(request.registry) and any(
             e.id in m.word_ids for m in request.mentions)
-        return kind_ok and (block_ok or mention)
+        quote=item.selection_quote or item.source_quote
+        if e.kind=="formula": support=formula_supported(e,elements,item)
+        elif e.kind=="line": support=literal_contains(e.text,quote)
+        elif e.kind=="symbol": support=spoken_math_contains(e.text,quote)
+        elif e.kind=="word": support=literal_contains(e.text.strip(".,:;()[]"),quote)
+        else: support=True
+        return kind_ok and (block_ok or mention) and (support or mention)
 
     candidates = [e for e in elements if any(allowed(i,e) for i in request.items)]
     rows = [[e.id, e.kind, e.text, e.marker, e.parent_ids] for e in candidates]
-    items = [{"id": i.id, "quote": i.source_quote, "content": i.content,
+    items = [{"id": i.id, "quote": i.source_quote, "selection_quote":i.selection_quote, "content": i.content,
               "target_kind": i.target_kind, "block_ids": i.block_ids,
               "allowed_ids": [e.id for e in candidates if allowed(i,e)]} for i in request.items]
     example = {"selections":[{"knowledge_id":i.id,"page":i.page,"status":"selected",
                               "target_element_id":"CHOOSE_FROM_ALLOWED_IDS",
                               "target_text":"" if i.target_kind == "figure" else "literal selected text",
                               "relationship":"explains","confidence":0.8,"alternatives":[],
-                              "annotation_hint":"circle_and_note"} for i in request.items]}
+                              "annotation_hint":"short_note"} for i in request.items]}
     return (
         f"{SELECTION_VERSION}. {SELECTION_SYSTEM} Select existing slide element IDs explained by the speech. "
         f"Image mode: {request.image_mode}. "
@@ -89,6 +121,11 @@ def selection_prompt(request: TargetRequest):
         "a formula is a whole equation, a symbol/word is one precise existing token. "
         "For a figure, target_text must be the empty string, because the figure table text is empty. "
         "Do not select a different repeated symbol outside the supplied block_ids. "
+        "When selection_quote is nonempty, anchor ONLY that exact excerpt (the whole quote remains audio evidence). "
+        "A knowledge item may explain several DIFFERENT equations or terms: choose ONE central, directly supported target. "
+        "Do not list other explained equations as alternatives; alternatives mean mutually exclusive locations for the SAME referent. "
+        "Prefer a complete meaningful formula over a fragment containing only operators. "
+        "For definitions, prefer a distinctive named term rather than a repeated single-letter variable. "
         "If speech does not identify a unique visible target, use status ambiguous/unmatched, "
         "target_element_id null, target_text empty, and preserve candidate IDs in alternatives. "
         "For unmatched use alternatives []. For ambiguous use at most 5 candidate IDs. "
@@ -156,16 +193,14 @@ def validate_selection(request: TargetRequest, reply: TargetSelections):
             # association; this is provenance, NOT a proof of semantic entailment.
             return ("accepted", ["quote_at_source_time", "existing_figure_block_association"]) if in_block else ("figure_without_block_evidence", [])
         if target.kind == "formula":
-            words = [e for e in elements.values() if target.id in e.parent_ids]
-            direct = literal_contains(proposal.target_text or target.text, item.source_quote)
-            # A partial formula explanation must name a real symbol/word on that formula.
-            direct = direct or any(len(w.text) > 1 or w.kind == "symbol" for w in words
-                                   if literal_contains(w.text, item.source_quote))
+            direct = formula_supported(target,elements.values(),item)
         else:
-            direct = literal_contains(target.text.strip(".,:;()[]"), item.source_quote)
+            quote=item.selection_quote or item.source_quote
+            direct = literal_contains(target.text.strip(".,:;()[]"), quote)
             if target.kind == "symbol":
                 direct = re.search(r"(?<!\w)" + re.escape(target.text) + r"(?!\w)",
-                                   unicodedata.normalize("NFKC",item.source_quote)) is not None
+                                   unicodedata.normalize("NFKC",quote)) is not None
+                direct=direct or (target.source=="pdf" and spoken_math_contains(target.text,quote))
         if not direct and not supporting_mentions:
             return "unsupported_target", []
         repeated = [e for e in elements.values() if e.id in visible and e.kind == target.kind
@@ -176,7 +211,9 @@ def validate_selection(request: TargetRequest, reply: TargetSelections):
             repeated_ids = {e.id for e in repeated}
             if not any(len(repeated_ids & set(m.word_ids)) == 1 for m in supporting_mentions):
                 return "ambiguous_repeated_text", []
-        return "accepted", ["quote_at_source_time", "literal_pdf_text" if direct else "timed_mention"]
+        named=not literal_contains(target.text,item.source_quote) and any(
+            spoken_math_contains(char,item.source_quote) for char in target.text if char in SPOKEN_GREEK)
+        return "accepted", ["quote_at_source_time", "explicit_spoken_greek" if named and direct else "literal_pdf_text" if direct else "timed_mention"]
 
     for item in request.items:
         rows = [p for p in reply.selections if p.knowledge_id == item.id]

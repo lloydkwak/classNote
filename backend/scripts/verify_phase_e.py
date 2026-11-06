@@ -67,7 +67,7 @@ def main():
         for index in pages:
             pair=[]
             for label,doc in (("baseline",old),("v2",new)):
-                page=doc[index-1]
+                page=doc[index]
                 pix=page.get_pixmap(matrix=pymupdf.Matrix(min(1.3,1000/page.rect.width),min(1.3,1000/page.rect.width)))
                 path=root/f"{label}-page-{index}.png";pix.save(path)
                 pair.append((label,index,path,pix.width,pix.height))
@@ -103,7 +103,7 @@ def main():
                                        output_height=layout.output_height,notes=overflow_notes,layout_metrics=layout.metrics)]
         export_annotated_pdf(folder/"input.pdf",overflow,root/"overflow.pdf")
         with pymupdf.open(root/"overflow.pdf") as doc:
-            doc[page.page-1].get_pixmap(matrix=pymupdf.Matrix(.4,.4)).save(root/"overflow-preview.png")
+            doc[page.page].get_pixmap(matrix=pymupdf.Matrix(.4,.4)).save(root/"overflow-preview.png")
         report["overflow_capacity_probe"]={"synthetic_repeated_text":True,"notes":12,"metrics":layout.metrics,
                                            "original_height":page.height,"output_height":layout.output_height}
     report["original_files_unchanged"]=all(hash_file(source/p)==h for p,h in original.items())
@@ -112,7 +112,7 @@ def main():
         for name in ("baseline","layout-v2"):
             with pymupdf.open(root/f"{name}.pdf") as exported:
                 report["pdf_export_validity"][name]={"opens":True,"page_count":len(exported),
-                    "original_text_retained":all(set(original_pdf[i].get_text().split())<=set(exported[i].get_text().split()) for i in range(len(exported)))}
+                    "original_text_retained":all(set(original_pdf[i].get_text().split())<=set(exported[i+1].get_text().split()) for i in range(len(original_pdf)))}
     assert report["original_files_unchanged"]
     assert report["pages"]["v1"]==report["pages"]["v2"]
     assert report["retention"]["v1"]==report["retention"]["v2"]

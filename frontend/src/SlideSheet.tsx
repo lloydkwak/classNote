@@ -172,7 +172,7 @@ export function SlideSheet(props: {
                     <polyline
                       key={index}
                       className="mark"
-                      style={{strokeWidth:sketch.stroke_width??1.6,opacity:sketch.stroke_opacity??1}}
+                      style={{strokeWidth:sketch.stroke_width??1.6,opacity:sketch.stroke_opacity??1,stroke:sketch.mark_color?`rgb(${sketch.mark_color.map(v=>v*255).join(',')})`:undefined}}
                       pathLength={1}
                       points={toPoints(stroke)}
                     />
@@ -181,6 +181,7 @@ export function SlideSheet(props: {
                     <polyline
                       key={index}
                       className="arrow"
+                      style={{stroke:sketch.mark_color?`rgb(${sketch.mark_color.map(v=>v*255).join(',')})`:undefined}}
                       pathLength={1}
                       points={toPoints(stroke)}
                     />
@@ -198,10 +199,10 @@ export function SlideSheet(props: {
                       lang={note.language}
                       fontSize={sketch.font_size}
                       x={sketch.x}
-                      y={sketch.y + index * sketch.line_height + sketch.font_size}
-                      style={{ animationDelay: `${before + textStart + index * LINE_SECONDS}s` }}
+                      y={sketch.y + index * sketch.line_height + (sketch.placement?.baseline_offset??sketch.font_size)}
+                      style={{ animationDelay: `${before + textStart + index * LINE_SECONDS}s`,fill:sketch.text_color?`rgb(${sketch.text_color.map(v=>v*255).join(',')})`:undefined }}
                     >
-                      {line.split(/([=+−α-ωΑ-Ω-]+)/).map((run,i)=><tspan key={i} style={/^[=+−α-ωΑ-Ω-]+$/.test(run)?{fontFamily:'serif'}:undefined}>{run}</tspan>)}
+                      {line.split(/([=+−α-ωΑ-Ω()\[\]{}→←↔⇒⇔-]+)/).map((run,i)=><tspan key={i} style={/^[=+−α-ωΑ-Ω()\[\]{}→←↔⇒⇔-]+$/.test(run)?{fontFamily:'serif'}:undefined}>{run}</tspan>)}
                     </text>
                   ))}
                 </g>

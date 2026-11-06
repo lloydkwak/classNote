@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --experimental-strip-types --no-warnings --test src/playback.test.ts src/fileRules.test.ts",
+    "test": "node --experimental-strip-types --no-warnings --test src/playback.test.ts src/fileRules.test.ts src/pageNavigation.test.ts",
     "preview": "vite preview",
     "postinstall": "node scripts/copy-pdf-assets.mjs"
   },

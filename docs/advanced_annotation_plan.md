@@ -1,6 +1,38 @@
 # Advanced annotation — Phase A/B, 2026-11-06
 
-## 최신 Phase E 상태
+## 긴급 후속: Slide-first + Lecture Overview (구현/검증 완료 범위)
+
+시작 `148e246` clean. 지정된 `classNote.pdf`, `classNote (1).pdf` 이름은 repo 전체 PDF 검색에서
+찾지 못했다. 같은 원본 hash의 실제 job `05a433631737`, `23ce2281310c`에는 검증된 지식6개와
+6페이지 설명이 존재한다. 이전6c job은4개/partial이다. 원본 대신 복사본으로 비교한다.
+
+현재 원인: 내부 후보에0.8×page-width 페널티, 고정33% gutter, limited mark policy,
+voiced math/숫자 표기와 native text의 불일치 및 일부 job의 grounding 미실행.
+새 기본은 slide-first. native canonical ID 검증→의미별 action→내부 free-space 우선→margin fallback.
+Overview는 validated Rich Notes 전부를 입력으로 density와 독립적으로 생성하고 첫 export page에
+삽입한다. 기존1-based source page API는 유지하고 source_slide_index(0-based)와
+export_page_index(overview0,source0→export1)를 별도 명시한다. audio index는 절대 이동하지 않는다.
+
+근거 없는 거절 승격/임의 좌표 금지. 작은 표기 정규화는 정확한 source quote 재검증 및
+negative/ambiguity 테스트로만 도입한다. 기존 GPU환경·PyAV18.1.0·데이터·모델은 보존한다.
+
+## 후속 최종 상태
+
+- 기존 production `grounded_notes → consolidate → layout_v2 → export_density`에 slide-first를 기본 적용.
+  semantic action, native Symbol font 해석/분산 수식 glyph 결합, strict target validation 유지.
+- 모든 native word를 layout-only obstacle로 보호. 실제 PDF에서 발견된 계산식 겹침과
+  혼합 글꼴 baseline 문제 수정. margin은 fallback이며 이번 실제 11개 메모는 모두 내부 배치.
+- density와 독립적인 source-validated Overview를 모든 export 첫 장에 삽입.
+  source/API/audio 번호 보존, exported index 분리, legacy/density/재export 호환.
+- 실제 최신 job은 저장 후보 재검증 6→11, 8B accepted9/ambiguous2, 직접 강조8.
+  원본11→최종12장, 원본 bytes/content와 page audio 보존. 새 STT/정렬/의미 호출0.
+- backend474/frontend31/Chromium7/build 통과. GPU 최종새호출11/OOM0/peak7.23GiB.
+- 결과: `data/slide-first-runs/real-reviewed`. 비교/실패/한계는 품질 보고서 최상단 참조.
+- 3/6페이지 정렬, 잘린 field quote, 그림 내부 label/벡터 grounding은 남는다.
+  Phase F의 human gold와 실강의 semantic coverage를 완료했다고 주장하지 않는다.
+
+## 이전 Phase E 상태 (역사 기록)
+
 
 시작 HEAD `8345a5f`, clean main. 실제 회귀 job `6c094c2fe7cc`의11페이지 PDF/녹음/37segments를
 찾았고 복사본에서 같은 저장 source/action의 v1/v2 PDF를 비교했다.

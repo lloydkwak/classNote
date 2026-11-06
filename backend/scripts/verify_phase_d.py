@@ -125,7 +125,7 @@ def main():
         assert any(v.reason=="source_quote_not_found" for v in pipeline.read_detailed_notes(job).validation)
         for name in ("annotated.pdf","grounding_results.json","evidence_graph.json","annotation_actions.json"):
             shutil.copyfile(folder/name,root/name)
-        command=["pdftoppm","-png","-scale-to","1800","-singlefile",str(root/"annotated.pdf"),str(root/"preview")]
+        command=["pdftoppm","-f","2","-png","-scale-to","1800","-singlefile",str(root/"annotated.pdf"),str(root/"preview")]
         subprocess.run(command,check=True,capture_output=True)
         report["graph_example"]=next((n for n in graph["nodes"] if n["kind"]=="annotation_action"
                                       and n["data"]["grounding_status"]=="accepted"),None)

@@ -1,5 +1,17 @@
 # Phase C — Set-of-Mark visual grounding
 
+## Slide-first 후속 production 변경 (2026-11-06)
+
+기존 canonical ID 검증을 유지하며 native Symbol font Greek decoding, raw_pdf_text provenance,
+동일 block의 실제 glyph geometry 기반 equation 결합을 추가했다. registry version은
+som-registry-v3-symbol-font-equations이다. 모델이 선택할 수 있는 ID와 layout-only 보호
+bbox는 별개다. `selection_quote`는 원문의 정확한 부분 문자열만 허용한다.
+전체 source_quote/time/segment IDs는 유지한다. common word 하나만으로 수식을 지지하지 않는다.
+새 prompt/validation version은 handoff 최상단 참조. 그림 block association은 내부 label의
+의미 확인이 아니므로 generic Detailed Notes 링크로 안전하게 렌더한다.
+실제11요청 accepted9/ambiguous2, 시각 검토/한계는 품질 보고서 최상단 참조.
+
+
 > 2026-11-06 Phase D 업데이트: 현재 opt-in production notes/API/layout/export까지 연결했다.
 > 아래 CLI/API 수준 설명은 Phase C 당시 범위다. 실제 통합 구조·필드·무효화·fallback은
 > [Evidence Graph](evidence_graph.md), 실측/시각적 한계는

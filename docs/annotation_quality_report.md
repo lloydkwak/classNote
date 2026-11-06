@@ -1,3 +1,118 @@
+# Slide-first + Lecture Overview 검증 — 2026-11-06
+
+실제 강의 job `05a433631737`의 11페이지 PDF/37개 STT segments/기존 alignment와 저장된
+Rich Notes 후보를 복사하여 사용했다. 지정된 `classNote.pdf`, `classNote (1).pdf` 파일명은
+저장소에서 찾지 못했다. 이 이름의 두 파일을 직접 분석했다고 주장하지 않는다.
+새 STT/정렬/의미 LLM 호출은 0이다. 원본 job의 모든 기존 파일 hash를 실행 전후 비교했다.
+
+## 결과와 비교 범위
+
+- 실제 saved before: validated 6개, 내부 텍스트 메모 0개, 원본 PDF 11페이지.
+- 발화의 명시적 `zero/one` 표기만 숫자 0/1과 대조하도록 수정하고 저장 후보를 재검증:
+  validated 11개. 기존 6개의 ID/content/short_note/source_quote는 보존했다.
+- 1개 field 일반화 후보는 source_quote가 문장 중간에서 끝나 숫자 근거가 부족하여 계속 거절.
+  quote validation을 풀어 통과시키지 않았다. 정렬 자체는 수정하지 않았다.
+- 최종 실제 8B: 11개 요청, accepted 9 / ambiguous 2 / rejected 0 / unmatched 0.
+  accepted 중 figure 1개는 block association만 확인되었으며 내부 기호 의미의 검증이 아니다.
+- 선택/배치/렌더 텍스트 메모 11개, 내부 11 / margin 0, 직접 강조 8개 (선택 항목의 72.73%).
+  이 비율은 semantic coverage나 target accuracy가 아니다. 사람 gold accuracy는 null.
+- 실제 mark: bracket 2, check 2, highlight 1, box 1, underline 2, connector arrow 7.
+  실제 강의 circle/standalone-arrow action은 0이다. circle 포함 7종의 PDF renderer contract는
+  mock/native geometry 테스트로 별도 검증했으며 실제 8B 기호 선택 성공으로 과장하지 않는다.
+- 같은 knowledge 11개/선택 action/target/font를 쓰는 `same-evidence-baseline.pdf`를 추가했다.
+  현재 planner + v1 layout/renderer 비교이며 옛 코드 버전 전체를 재현한 결과는 아니다.
+
+| 같은 근거 비교 | v1 layout/renderer | slide-first |
+|---|---:|---:|
+| 내부 메모 텍스트 | 0 | 11 |
+| 외부 메모 텍스트 | 11 | 0 |
+| native 텍스트 상자 가림 면적 (pt²) | 0 | 0 |
+| stroke/native word 간섭 (word/path 접촉) | 25 | 0 |
+| connector/native word 간섭 | 14 | 0 |
+| annotation box 겹침 | 0 | 0 |
+| connector 교차 | 0 | 0 |
+| figure/caption 간섭 | 0 | 0 |
+| 페이지 밖 | 0 | 0 |
+
+connector 교차/텍스트 상자 가림은 원래 0이어서 개선됐다고 주장하지 않는다.
+자체 target의 반투명 highlight 접촉 1건은 별도 집계하며 불투명 가림과 구분한다.
+실제 exported note word bbox와 원본 native word bbox를 직접 대조한 충돌 0,
+exported note word의 페이지 밖 0도 확인했다. raster 내부 글자/의미 정확도를 보장하는 지표는 아니다.
+
+## 실제 이미지 검토 및 발견한 오류
+
+Codex가 Overview, 슬라이드3/4/5/6, 3열 contact sheet와 브라우저 desktop/mobile 이미지를 열어
+검토했다. 사람 평가자가 작성한 gold/사용성 점수와 구분한다.
+
+- 3페이지: 마지막 결론 발화를 verbatim focus로 지정하여 `-z = -α - βj` native 식에 bracket.
+  반복 z 대상 정의 항목은 ambiguous 상태와 일반 메모를 유지한다.
+- 4페이지: 두 예제의 native 식에 check 및 connector, 내부 필기 두 개.
+  중간 검토에서 수식 조각이 semantic 추출에서 제외되어 메모와 겹치는 오류를 실제 PNG에서
+  발견했다. 배치에는 모든 raw native word를 별도 보호하고 PDF/SVG baseline/글꼴 높이를
+  공유하도록 수정했다. 최종 PNG와 exported word bbox에서 충돌이 해소된 것을 확인했다.
+- 5페이지: reflection에 투명 highlight. 그림 전체 원 제거. 그림의 w/γ/δ와 기존 z/α/β
+  short note를 같은 뜻으로 취급할 수 없어 PDF의 figure 메모를 Detailed Notes 연결 안내로
+  바꿨다. 원래 상세 설명·quote는 보존했다. vector/원점의 세밀한 geometry는 미검증이다.
+- 6페이지: theorem에 box, 실제 native glyph로 결합한 인수분해 식에 bracket.
+  field 일반화 후보 탈락과 페이지 alignment confidence 0은 여전히 audit/UI에 표시한다.
+- 초기 Overview의 괄호/화살표가 아이콘처럼 보이는 font slot 오류를 발견하여 기존 CJK math
+  fallback을 적용했다. Unicode 추출과 1페이지 압축/근거 부족/재export를 테스트했다.
+
+## Overview/페이지/오디오
+
+최종 12페이지 = Overview 1 + 원본 11장이다. 원본 텍스트 토큰, 순서, 페이지 크기/비율을
+검사했다. UI Overview는 0이지만 source API page는 기존 1..11이며 source_slide_index는
+0..10, export_page_index는 1..11이다. PDF embedded mapping과 graph render 참조도 일치한다.
+기존 page_audio JSON을 복사본과 완전히 비교했고 5개 audio range의 source page→export index와
+시간이 유지된다. density 세 모드/기존 job/다운로드/브라우저 seek를 검증했다.
+시간 신뢰도가 낮은 3/6페이지에는 Overview에서 확인 필요를 표시한다.
+PDF에는 원본 슬라이드로 이동하는 내부 링크가 있다. 오디오 seek는 UI 시간 버튼에서 제공하며
+오프라인 PDF에 외부 audio URL을 넣는 기능은 없다.
+
+## 실제 GPU 측정
+
+기존 RTX3080 10GB / driver550.163.01 / CUDA12.4 / SSD cache 유지.
+`.venv-vlm`: torch2.6.0+cu124, transformers4.57.6, bitsandbytes0.49.0, accelerate1.12.0.
+checkpoint `Qwen/Qwen3-VL-8B-Instruct`, revision `0c351dd01ed87e9c1b53cbc748cba10e6187ff3b`,
+NF4 double quantization / SDPA / batch1. 최종 fresh run:
+
+- 새 실제 추론 11, cache hit 0, OOM 0, retry 0, JSON schema valid 11/11.
+- load 9.762초, 평균 inference 2.647초 (2.030–3.521), grounding stage 45.084초.
+- 장치 표본 peak 7.23GiB (7,764,705,280 bytes), torch allocated peak 6.74GiB,
+  reserved 6.95GiB. 두 기준을 혼동하지 않는다.
+- input tokens 1348–2331, output 69–101, 원본 이미지1080×810→제한836×627.
+- 종료 후 nvidia-smi 10MiB, compute worker 없음 확인.
+- 원인 분석을 위한 모든 prompt/validator revision 실행 합계는 새 추론71회 + cache6회다.
+  `real-03`은 GPU11회 뒤 평가 스크립트 NameError로 실패했고 수정 후 새 폴더에서 검증했다.
+  최종 결과와 실패한 중간 산출물을 구분한다. 모델 재다운로드/새 모델 설치는 없다.
+- 최종 PDF 수정은 `--resume`으로만 수행했으며 VLM 추가 호출 0. 보고서의
+  previous_gpu_sampling/grounding_telemetry는 최초 실제 GPU 실행의 역사적 측정이다.
+
+## 테스트와 산출물
+
+최종 backend **474 passed**, frontend **31 passed**, production build 통과.
+Chromium **7 시나리오 통과, page error0**, 폭375/768/1280/1440 overflow 없음.
+업로드/상태 mock 테스트와 실제 저장 강의 API/PDF/audio 탐색을 구분한다.
+PyAV18.1.0 + faster-whisper1.2.1에서 실제 synthetic WAV decode 560000 samples 성공.
+이 테스트는 실제 강의 STT를 다시 실행한 결과가 아니다. dependency sync/lock 재해결 없음.
+기존 bundle size warning은 남는다. 기존 OOM/timeout/cancel 회귀는 mock이며 이번 단계에서
+실제 OOM을 의도적으로 유발하지 않았다.
+
+`data/slide-first-runs/real-reviewed/`:
+`before.pdf`, `after.pdf`, `same-evidence-baseline.pdf`, `overview-preview.png`,
+`slide3-preview.png`..`slide6-preview.png`, `contact-sheet.png`, `annotations.json`,
+`annotation_actions.json`, `grounding_results.json`, `evidence_graph.json`,
+`action-metrics.json`, `page-mapping-tests.json`, `report.json`, `quality-report.md`, `frontend/`.
+`data/slide-first-runs/synthetic-mock/`은 7개 지식의 mock production end-to-end 결과다.
+전체 강의 semantic coverage/human gold 정확도/새 STT·alignment 개선은 미검증이다.
+
+다음 우선순위: 실제 3/6페이지 alignment gold, 잘린 field quote의 extraction 복구,
+figure 내부 w/γ/δ/축·벡터의 검증 가능한 geometry, 긴 connector의 라우팅 품질과 사람 A/B.
+
+---
+
+## 이전 Phase E/D 기록
+
 # Advanced annotation quality — Phase E (2026-11-06)
 
 ## Phase E 최종 검증

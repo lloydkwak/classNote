@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from app.models import AnnotationProvenance
+from app.models import AnnotationProvenance, VisualMark
 
 
 def fingerprint(value):
@@ -30,7 +30,8 @@ class AnnotationAction(BaseModel):
     target_element_id: str | None
     target_kind: str | None
     grounding_status: str
-    annotation_type: Literal["underline","circle","bracket","none"]
+    annotation_type: VisualMark
+    selection_reason: str = ""
     annotation_text: str
     priority: int
     density: str

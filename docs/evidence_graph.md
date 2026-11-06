@@ -1,5 +1,16 @@
 # Phase D — production evidence graph (2026-11-06)
 
+## Overview export index 확장 (2026-11-06)
+
+기존 source `page`는 1-based로 보존한다. `source_slide_index=page-1`,
+`export_page_index=page` (0-based), 물리 PDF page 번호는 `page+1`이다.
+Overview는 export_page_index0/source_slide_index null이다. rendered_annotation node와
+PDF embedded classnote-page-map.json에 이 구분을 저장한다. lecture_overview node는
+검증된 knowledge에서 summarized_in edge로 연결된다. 밀도 변경은 Overview의 근거를 줄이지 않는다.
+Action의 selection_reason, layout의 baseline/stroke/target geometry, 원래 quote/segment/time
+chain은 export까지 유지한다. 실제 예시는 data/slide-first-runs/real-reviewed/evidence_graph.json.
+
+
 Phase E는 이 graph/ID 체인을 재사용하고 선택적 Layout v2의 geometry와 render revision을
 추가한다. figure block만 확인된 경우 v2에서는 큰 원/세부 connector를 생략한다.
 기본 v1 렌더 정책과 구분할 것. 현재 확장 필드/캐시/overflow는 [Layout v2](layout_v2.md) 참고.
