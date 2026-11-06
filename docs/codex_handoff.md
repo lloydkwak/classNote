@@ -224,3 +224,55 @@ Phase A 완료. Phase B 게이트는 실제 8B smoke 측정 기록으로 판단�
 `backend/tests/test_vlm.py`, `docs/{advanced_annotation_plan,gpu_benchmark,annotation_quality_report,
 technology_decisions,codex_handoff,ubuntu_vlm}.md`.
 commit/push 없음. 기존 강의·비밀키·캐시·lockfile·production planner/layout/frontend 파일 보존.
+
+## Phase C 인수 — 2026-11-06 SSD Set-of-Mark grounding
+
+시작 `b6903b4`/clean main, origin/main도 동일. 이전 A/B는 이미 `add vlm`으로 commit/push됨.
+사용자가 SSD에 모델을 저장하고 `data/vlm-runs/ssd-smoke/report.json` 성공을 확인했다.
+현재 모델 cache **`/root/classNote/models/huggingface`**가 기본이며 tmpfs가 아니다.
+Phase A/B 재구현/모델 재다운로드 없이 기존 8B/NF4/SDPA lazy worker에 ID 선택을 추가했다.
+
+### 구현과 연결 지점
+
+- `app/grounding/{schema,document,selection}.py`: typed registry, native word/line/figure reuse,
+  `∇L` 내부 native ∇ character bbox, 회전/crop/scale transform, 선택 schema/검증.
+- `pdf_extract.py`: 기존 `render_marked_page`에 optional numeric marks/font/clip 추가.
+  기존 word 추출의 수식 내부 '-' bullet 오인 삭제를 수정했다. 따라서 이전 word-ID mentions는
+  새 registry hash와 맞지 않으면 사용하면 안 된다.
+- `VLMConfig`의 모델 cache 기본값을 SSD로 지정. `GPUWorkerProvider.select_targets`가 같은
+  단일 subprocess/cache/lease/OOM lifecycle을 재사용한다. 모델 출력 좌표는 schema에서 금지.
+- `GroundingItem.from_content_item`으로 기존 Rich Notes schema를 재사용한다.
+  production API/planner/layout/export에 자동 연결하지 않았다. `.venv-vlm` Python API/CLI로 실행한다.
+- `scripts/ground_page.py`: 기존/SoM 실제 비교, single-page crop, registry/PNG/JSON/contact sheet.
+  출력 폴더를 덮어쓰지 않으며 기본 비교는 uncached, 모델 가중치를 다운로드하지 않는다.
+
+### 실제 결과와 한계
+
+최종 `data/grounding-runs/phase-c-06/report.json`: 실제 **14회**, schema **14/14**, OOM 0.
+original/SoM 각각 7 cases: 단어·α·수식·∇·graph 5개 positive 모두 native ID에 연결.
+없는 β에 original 모델이 α를 선택했으나 unsupported_target으로 거부, SoM은 unmatched.
+반복 θ는 두 모델 결과 모두 첫 θ를 선택했으나 ambiguous로 처리하고 두 후보 ID 보존.
+raw ID/abstention 기대 일치는 original 5/7, SoM 6/7; 검증 후 양쪽 7/7.
+이는 prompt 개발에 사용한 synthetic fixture이고 사람 verified/held-out 성능이 아니다.
+
+assistant가 원본/SoM/∇/수식/그림/반복 θ PNG를 확인했다. 모델 bbox 대신 native geometry를 쓰므로
+∇ 한 글자와 식 전체/그림이 다른 영역으로 정확히 매핑됐다. 실제 강의/스캔 OCR/복잡 수식 정확도는 미측정.
+첫 5개 실험의 JSON fence/array, system message TypeError, 잘못된 ID/figure text도 삭제하지 않고 보존했다.
+시각적 정확도와 사람 검토가 필요한 이유를 `docs/visual_grounding.md`에 기록했다.
+
+최종 validation v2의 unique-mention guard로 실제 14개 응답을 재검사한
+`phase-c-06/revalidation-v2.json`은 결과 변경 0, 신규 GPU 요청 0이다.
+
+### 검증/환경 주의
+
+- backend 전체 **408 passed, 39.27s**. 관련 **51 passed** (신규 Phase C 26개 포함).
+- frontend player **25 passed**, Node 22 production build passed, 기존 bundle warning 유지.
+- 최초 전체는 `.env`의 Windows FFMPEG_PATH 때문에 음성 4개 실패/400개 통과.
+  `.env`를 수정하지 않고 process env `FFMPEG_PATH=/usr/bin/ffmpeg`로 재검증하여 모두 통과.
+- code/scripts/docs만 변경. 기존 데이터/키/lockfile/Git 변경/모델 보존, 모델·평가 산출물은 ignored.
+- Phase C는 아직 실제 API 서버에 별도 VLM interpreter entrypoint로 연결하지 않았다.
+  backend torch/CUDA와 VLM 환경은 계속 분리한다. 기존 STT/e5까지의 GPU 중앙 scheduler는 후속 과제다.
+
+재실행: `.venv-vlm/bin/python backend/scripts/ground_page.py --output data/grounding-runs/<new-name>`.
+상세 사용법/좌표/입력 schema/실패 분석: `docs/visual_grounding.md`.
+다음 우선순위: 실제 강의 target gold/여러 그림의 모호성 검토 → Phase D evidence/action 연결 → layout/export.

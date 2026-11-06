@@ -53,6 +53,15 @@ class QwenRuntime:
         return time.perf_counter() - started
 
     def analyze(self, request, reduced=False):
+        return self._generate(request, analysis_prompt(), PageAnalysis, "analysis", reduced)
+
+    def select_targets(self, request, reduced=False):
+        from app.grounding.schema import TargetSelections
+        from app.grounding.selection import selection_prompt
+
+        return self._generate(request, selection_prompt(request), TargetSelections, "selection", reduced)
+
+    def _generate(self, request, prompt, output_schema, result_field, reduced=False):
         import torch
         from PIL import Image
 
@@ -69,8 +78,12 @@ class QwenRuntime:
         image = image.resize((max(1, int(image.width * scale)), max(1, int(image.height * scale))))
         self.processor.image_processor.size = {"shortest_edge": 16384, "longest_edge": pixels}
         messages = [{"role": "user", "content": [
-            {"type": "image", "image": image}, {"type": "text", "text": analysis_prompt()},
+            {"type": "image", "image": image}, {"type": "text", "text": prompt},
         ]}]
+        if result_field == "selection":
+            from app.grounding.selection import SELECTION_SYSTEM
+
+            messages.insert(0, {"role":"system", "content":[{"type":"text", "text": SELECTION_SYSTEM}]})
         inputs = self.processor.apply_chat_template(
             messages, tokenize=True, add_generation_prompt=True,
             return_dict=True, return_tensors="pt",
@@ -110,11 +123,11 @@ class QwenRuntime:
         # Retain failed generation measurements without caching it as success.
         try:
             self.phase = "validate_output"
-            analysis = PageAnalysis.model_validate_json(raw)
+            analysis = output_schema.model_validate_json(raw)
         except ValidationError as error:
             raise StructuredOutputFailure(raw, metrics) from error
         metrics["schema_valid"] = True
-        return {"analysis": analysis.model_dump(mode="json"), "metrics": metrics}
+        return {result_field: analysis.model_dump(mode="json"), "metrics": metrics}
 
     def close(self):
         import torch
@@ -136,7 +149,10 @@ def worker_main(connection, config, factory):
                 return
             request, reduced = command
             try:
-                connection.send({"ok": True, "value": runtime.analyze(request, reduced)})
+                from app.grounding.schema import TargetRequest
+
+                value = runtime.select_targets(request, reduced) if isinstance(request, TargetRequest) else runtime.analyze(request, reduced)
+                connection.send({"ok": True, "value": value})
             except Exception as error:
                 # torch is optional for deterministic lifecycle tests.
                 is_oom = error.__class__.__name__ in {"OutOfMemoryError", "MockOOM"}

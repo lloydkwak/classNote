@@ -73,21 +73,38 @@ class GPUWorkerProvider:
         self._process = self._pipe = self._lease = None
 
     def analyze_page(self, request: PageRequest, *, use_cache=True):
+        request = PageRequest.model_validate(request)
+        return self._request(request, analysis_prompt(), PageAnalysis, "analysis", use_cache=use_cache)
+
+    def select_targets(self, request, *, use_cache=True):
+        from app.grounding.schema import TargetRequest, TargetSelections
+        from app.grounding.selection import selection_prompt, speech_error, validate_selection
+
+        request = TargetRequest.model_validate(request)
+        errors = {item.id: reason for item in request.items if (reason := speech_error(item, request.segments))}
+        if errors:
+            raise VLMFailure("invalid_speech_evidence", details={"items": errors})
+        result = self._request(request, selection_prompt(request), TargetSelections, "selection", use_cache=use_cache,
+                               context=request.model_dump(mode="json", exclude={"image_path"}))
+        result["grounding"] = validate_selection(request, TargetSelections.model_validate(result["selection"]))
+        return result
+
+    def _request(self, request, prompt, output_schema, result_field, *, use_cache, context=None):
         # A single deadline includes queueing, model loading, generation and retry.
         deadline = time.monotonic() + self.config.timeout_seconds
         if not self._thread_lock.acquire(timeout=self.config.timeout_seconds):
             raise VLMFailure("queue_timeout")
         try:
-            request = PageRequest.model_validate(request)
             payload = {"version": "worker-v1", "provider": f"{self.factory.__module__}.{self.factory.__qualname__}",
                        "config": self.config.model_dump(mode="json"),
-                       "page": request.page, "image_sha256": hashlib.sha256(request.image_path.read_bytes()).hexdigest(),
-                       "prompt": analysis_prompt()}
+                       "page": request.page if isinstance(request, PageRequest) else request.registry.page,
+                       "image_sha256": hashlib.sha256(request.image_path.read_bytes()).hexdigest(),
+                       "prompt": prompt, "operation": result_field, "context": context}
             key = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
             cache_path = self.config.cache_dir / f"{key}.json"
             if use_cache and cache_path.exists():
                 result = json.loads(cache_path.read_text())
-                PageAnalysis.model_validate(result["analysis"])
+                output_schema.model_validate(result[result_field])
                 # Historical metrics remain explicitly historical.
                 return {**result, "cache_hit": True, "new_inference": False}
             from app.config import get_settings
@@ -109,7 +126,7 @@ class GPUWorkerProvider:
                     raise
                 if response["ok"]:
                     result = response["value"]
-                    PageAnalysis.model_validate(result["analysis"])
+                    output_schema.model_validate(result[result_field])
                     result.update(cache_hit=False, new_inference=True, oom_count=attempt)
                     result["provenance"] = payload
                     if use_cache:
@@ -123,7 +140,10 @@ class GPUWorkerProvider:
                             if os.path.exists(temporary):
                                 os.unlink(temporary)
                     return result
-                self._stop(graceful=True)
+                # Invalid JSON is a response failure, not a corrupted CUDA context. Keep the
+                # healthy lazy model for the next request; OOM still disposes of its child.
+                if response["error_type"] != "StructuredOutputFailure":
+                    self._stop(graceful=True)
                 if response["kind"] != "oom" or attempt == 1:
                     raise VLMFailure(f"{response['kind']}:{response['error_type']}", details={
                         "oom_count": attempt + 1 if response["kind"] == "oom" else attempt,

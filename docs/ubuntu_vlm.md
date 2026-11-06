@@ -1,5 +1,9 @@
 # Ubuntu에서 서비스와 Qwen3-VL 재실행
 
+현재 환경 업데이트 (2026-11-06): 모델은 SSD `/root/classNote/models/huggingface`에 있으며
+`data/vlm-runs/ssd-smoke/report.json`으로 실제 추론 성공 확인. 아래 RAM tmpfs 설명은
+초기 A/B 실험 기록이다. 현재 실행은 SSD 경로가 기본이며 모델을 다시 다운로드할 필요가 없다.
+
 ## 기존 서비스
 
 Python 3.11+, uv, ffmpeg, Node >=22.13 필요. 기존 `.env`를 덮어쓰지 않는다.
@@ -93,8 +97,24 @@ smoke는 PNG/PDF 및 `report.json`을 ignored `data/`에 저장한다. 같은 �
 - 캐시는 image SHA/page/model revision/prompt/schema/budget/provider에 따라 구분된다.
   `DEMO_MODE=1`이면 cache miss에서 모델을 로드하지 않는다. cache hit의 과거 metrics는 신규 추론이 아니다.
 - 본 smoke의 bbox는 검토용 image 좌표다. PDF annotation에 직접 사용하면 안 된다.
-  element ID grounding 및 회전/crop 좌표 검증은 Phase C 작업이다.
+  `analyze_page`의 bbox는 계속 진단용이다. Phase C의 검증된 ID/좌표는 별도 `select_targets`로 제공한다.
 
 GPU peak는 Torch allocated/reserved와 device 전체 `nvidia-smi` 표본 peak를 구별한다.
 표본 주기 사이의 순간 peak는 포착하지 못할 수 있다. 첫 요청은 로딩 포함 wall time과 generation
 time을 별도로 기록한다. RSS는 worker 프로세스의 lifetime peak다. 실제 결과는 `gpu_benchmark.md` 참고.
+
+## Phase C 실행
+
+SSD cache를 기본으로 사용하는 실제 ID 선택은 [visual_grounding.md](visual_grounding.md) 참고.
+A/B를 다시 구현하거나 checkpoint를 다시 다운로드할 필요가 없다.
+
+```bash
+.venv-vlm/bin/python backend/scripts/ground_page.py --output data/grounding-runs/new-run
+# 기존 .env에 Windows ffmpeg 경로가 있더라도 파일을 바꾸지 않고 회귀 검증 가능
+cd backend
+FFMPEG_PATH=/usr/bin/ffmpeg .venv/bin/python -m pytest -q
+```
+
+원본/SoM PNG, registry, raw response/검증 JSON, ID 선택 결과 PNG/contact sheet를 저장한다.
+실강의는 `--pdf ... --page ... --evidence ...`를 사용한다. 기본 실행은 synthetic fixture이고
+사람 verified 품질 평가가 아니다. 현재 production viewer/planner에는 자동 적용하지 않는다.

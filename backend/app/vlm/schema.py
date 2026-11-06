@@ -3,8 +3,12 @@
 import json
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+if TYPE_CHECKING:
+    from app.grounding.schema import TargetRequest
 
 MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
 MODEL_REVISION = "0c351dd01ed87e9c1b53cbc748cba10e6187ff3b"
@@ -24,7 +28,7 @@ class VLMConfig(BaseModel):
     # Also used across local VLM processes. Other GPU stages are NOT integrated yet.
     lease_path: Path = REPO_ROOT / "data/gpu.lock"
     cache_dir: Path = REPO_ROOT / "data/cache/vlm"
-    model_cache_dir: Path | None = None
+    model_cache_dir: Path = REPO_ROOT / "models/huggingface"
     local_files_only: bool = True
 
 
@@ -58,6 +62,7 @@ class PageAnalysis(BaseModel):
 
 class VisualGroundingProvider(Protocol):
     def analyze_page(self, request: PageRequest, *, use_cache: bool = True) -> dict: ...
+    def select_targets(self, request: "TargetRequest", *, use_cache: bool = True) -> dict: ...
     def close(self) -> None: ...
 
 

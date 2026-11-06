@@ -102,3 +102,25 @@ coverage 개념만 참고한다. [AfterLecture](https://github.com/wcboy/AfterLe
 OR-Tools도 layout의 실제 제약 문제를 확인한 뒤 필요할 때만 도입한다.
 
 실측과 미완료 게이트는 `gpu_benchmark.md`, 사용법은 `ubuntu_vlm.md`를 따른다.
+
+## Phase C — IDs와 native geometry로 제한한 grounding
+
+- 기존 extract/word/line/figure 및 `render_marked_page`를 확장해 중복 parser/SoM renderer를 만들지 않았다.
+  회전 PDF는 원본을 수정하지 않는 unrotated 작업 복사본에서 읽고 원본 rotation/crop 변환을 보존한다.
+  [PyMuPDF coordinate API](https://pymupdf.readthedocs.io/en/latest/page.html#Page.rotation_matrix)를 기준으로
+  이미지/crop↔원본 crop-local PDF points를 검증한다.
+- [SoM](https://github.com/microsoft/SoM)의 마커/ID 선택 아이디어를 적용했다. 외부 repository 코드는
+  복사하지 않았다. 추가 Docling/MinerU/수식 인식 모델 설치 없이 native `rawdict` 문자 bbox로 ∇를 읽는다.
+- Qwen은 ID만 출력하고 좌표/신규 symbol은 생성할 수 없다. existing rich block 관계와 literal text,
+  source quote/시간, registry hash가 맞는 timed mentions를 교차검증한다. confidence만으로 수락하지 않는다.
+- parser가 Markdown/array 응답을 accepted JSON으로 묵시 변환하지 않는다. 실패를 보존하고
+  system list-content/명시적 JSON object/allowed IDs prompt로 수정했다. 형식 실패 후 건강한 worker는 재사용한다.
+- 선택은 optional Python API/CLI이며 production planner/HTTP API에 자동 연결하지 않는다.
+  공유 module을 import해도 모델은 lazy subprocess에서만 로드된다. 현재 CLI는 `.venv-vlm`에서 실행한다.
+- symbol 대소문자/수식 +/-를 보존하고, OCR의 추정 symbol 좌표·중복 기호는 보수적으로 거부한다.
+  기존 minus 누락 수정으로 word ID가 바뀔 수 있어 unversioned/stale mentions를 신뢰하지 않는다.
+- Phase C 검증은 별도 DB 없이 JSON/Pydantic. cache에 source/registry/alignment/viewport/image mode를 포함하며
+  cached raw selection도 현재 validation으로 재검사한다. block association/lexical 검사는 semantic entailment가 아니다.
+
+실제 synthetic 7-case 비교는 prompt 조정에 사용했으므로 held-out 성능으로 보고하지 않는다.
+구현/에러/이미지와 실측은 `visual_grounding.md`, `annotation_quality_report.md` 참고.

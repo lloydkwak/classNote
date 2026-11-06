@@ -1,5 +1,10 @@
 # Qwen3-VL 8B GPU benchmark — 2026-11-06
 
+최신 환경: SSD cache `/root/classNote/models/huggingface`, 약 17GB, SSD 여유 약 57GB.
+기존 `data/vlm-runs/ssd-smoke/report.json`은 completed_requires_visual_review, schema 2/2,
+OOM 0, 첫/후속 wall 20.657/2.997s, device peak 8,009,023,488 bytes를 기록한다.
+Phase C는 이 SSD cache를 재사용한다. 아래 tmpfs 성능은 초기 실험이며 SSD cold-load 값과 구분한다.
+
 ## 확인된 환경
 
 | 항목 | 실제 값 |
@@ -133,3 +138,24 @@ VLM parent/worker가 사라졌음을 확인했다. 모델을 GPU에 상주시키
 
 다운로드 최종 manifest **17,545,907,231 bytes**. 마지막 HTTP 병렬 재개만 **821.515s**이며
 이전 Xet/HTTP 시도 시간을 포함한 전체 다운로드 시간으로 보고하지 않는다.
+
+## Phase C — SSD 8B element selection
+
+재다운로드 없이 `models/huggingface`를 사용. `data/grounding-runs/phase-c-06/report.json`:
+actual GPU requests 14, cache hit 0, schema valid 14, OOM 0.
+이미지 1개/batch 1, pixels cap 524288, input cap 4096, output cap 256.
+입력 render 1440×810 → bound 965×543 → processor grid [1,34,60], 실제 vision 960×544.
+실제 input 1177–1405 tokens, output 52–63 tokens. 전체 강의 context는 넣지 않았다.
+
+- device sampled peak: **7,764,705,280 bytes (7405 MiB, 7.231 GiB)**.
+- device sampled mean: 6,270,403,374.67 bytes (요청 사이 검증/렌더와 종료 포함).
+- system RAM total−available sampled peak: 22,875,013,120 bytes, 다른 process/page cache 포함.
+- 첫 모델 load: 9.667s, 이미 읽힌 SSD cache에서 측정한 값. cold-load가 아님.
+- generation mean original 1.793s / SoM 1.772s. original이 첫 model load 비용을 부담하므로
+  두 모드의 wall mean을 직접 비교해 속도 개선을 주장하지 않는다.
+
+schema/ID/음성 검증 실패와 전체 이미지 결과는 `visual_grounding.md` 참고.
+정확도는 GPU latency/VRAM 수치로 대신 평가하지 않는다.
+
+Phase C 종료 확인: host `nvidia-smi` 14:07:00 KST, 10 MiB/10240 MiB,
+Xorg만 남고 VLM worker 없음. SSD 가중치는 유지하고 GPU 메모리를 반환했다.

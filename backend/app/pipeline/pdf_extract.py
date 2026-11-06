@@ -341,12 +341,13 @@ def _read_words(source: pymupdf.Page, page: Page) -> None:
     """Add the PDF's words, skipping headers and footers, which extraction already dropped."""
     text_blocks = [block for block in page.blocks if block.kind == "text"]
     lines: dict[tuple[int, int], list[tuple[str, BBox, str]]] = {}
-    for x0, y0, x1, y1, text, block_number, line_number, _ in sorted(
+    for x0, y0, x1, y1, text, block_number, line_number, word_number in sorted(
         source.get_text("words"), key=lambda word: (word[5], word[6], word[7])
     ):
         box = _normalized((x0, y0, x1, y1), page.width, page.height)
         block = _enclosing_block(box, text_blocks)
-        if block is not None and not _is_bullet(text):
+        # A standalone '-' inside an equation is an operator, not a list bullet.
+        if block is not None and not (_is_bullet(text) and word_number == 0):
             lines.setdefault((block_number, line_number), []).append((text, box, block.block_id))
     for words in lines.values():
         _append_line(page, [w[0] for w in words], [w[1] for w in words], words[0][2], "pdf")
@@ -557,7 +558,11 @@ def add_geometry(path: Path, extraction: PdfExtraction) -> None:
             page.free_rects = _free_rects(source, page)
 
 
-def render_marked_page(path: Path, page: Page, zoom: float = MARKED_ZOOM) -> bytes:
+def render_marked_page(
+    path: Path, page: Page, zoom: float = MARKED_ZOOM, *,
+    marks: list[tuple[str, BBox, bool]] | None = None,
+    font_size: float = MARK_FONT_SIZE, clip: pymupdf.Rect | None = None,
+) -> bytes:
     """A PNG of the page with a small tag on every line and figure, for the model to refer to.
 
     Tags are the ids without the page prefix: "l4" is line p3_l4, and "b7" is figure p3_b7.
@@ -565,7 +570,7 @@ def render_marked_page(path: Path, page: Page, zoom: float = MARKED_ZOOM) -> byt
     """
     with pymupdf.open(path) as document:
         source = document[page.page - 1]
-        tags = [
+        tags = marks if marks is not None else [
             (line.line_id.split("_")[1], line.bbox, False)
             for line in page.lines
         ] + [
@@ -581,12 +586,12 @@ def render_marked_page(path: Path, page: Page, zoom: float = MARKED_ZOOM) -> byt
                     color=MARK_FIGURE_COLOR,
                     width=1,
                 )
-            width = pymupdf.get_text_length(tag, fontsize=MARK_FONT_SIZE) + 3
-            rect = pymupdf.Rect(x - width, y, x, y + MARK_FONT_SIZE + 2)
+            width = pymupdf.get_text_length(tag, fontsize=font_size) + 3
+            rect = pymupdf.Rect(x - width, y, x, y + font_size + 2)
             if is_figure:
-                rect = pymupdf.Rect(x, y, x + width, y + MARK_FONT_SIZE + 2)
+                rect = pymupdf.Rect(x, y, x + width, y + font_size + 2)
             elif rect.x0 < 0:
-                rect = pymupdf.Rect(0, y, width, y + MARK_FONT_SIZE + 2)
+                rect = pymupdf.Rect(0, y, width, y + font_size + 2)
             source.draw_rect(
                 rect,
                 color=None,
@@ -594,6 +599,6 @@ def render_marked_page(path: Path, page: Page, zoom: float = MARKED_ZOOM) -> byt
                 overlay=True,
             )
             source.insert_text(
-                (rect.x0 + 1.5, rect.y1 - 2.5), tag, fontsize=MARK_FONT_SIZE, color=(1, 1, 1)
+                (rect.x0 + 1.5, rect.y1 - 2.5), tag, fontsize=font_size, color=(1, 1, 1)
             )
-        return source.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom)).tobytes("png")
+        return source.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=clip, alpha=False).tobytes("png")

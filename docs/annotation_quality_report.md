@@ -48,3 +48,28 @@ mock VLM tests는 lazy load, 두 페이지 순차 요청, 동일 child 재사용
 실제 출력에서 수식 영역 누락과 graph 설명/영역의 부정확성이 확인됐다.
 따라서 **VRAM에 들어가고 JSON이 유효하다는 사실만으로 annotation 품질 개선을 주장하지 않는다**.
 원본/응답과 첫 schema 실패는 `data/vlm-runs/gpu-smoke-01`, `gpu-smoke-02`에 보존한다.
+
+## Phase C — 실제 element-ID grounding
+
+`data/grounding-runs/phase-c-06/report.json`과 결과 PNG를 실제 확인했다. SSD의 기존 8B를
+사용했고 모델 재다운로드는 없다. source=synthetic, human_verified=false.
+
+| 지표 | original | SoM |
+|---|---:|---:|
+| 실제 요청 / schema valid | 7 / 7 | 7 / 7 |
+| positive target ID 일치 | 5 / 5 | 5 / 5 |
+| 모델 raw ID/abstention 기대 일치 | 5 / 7 | 6 / 7 |
+| 검증 후 ID/abstention 기대 일치 | 7 / 7 | 7 / 7 |
+| negative case 확정 연결 | 0 / 2 | 0 / 2 |
+
+대상은 gradient 단어, 식 내부 α, 수식 전체, ∇L 내부 ∇, graph다. 없는 β는 원본 모드에서
+α로 잘못 선택했으나 quote 검사가 거부했고, SoM 모드는 unmatched였다. 반복 θ는 양쪽 모두
+첫 θ를 골랐으나 중복 검사로 ambiguous 처리하고 두 후보 ID를 보존했다.
+
+모델 bbox를 사용하지 않아 ∇ 한 글자/수식 줄/graph가 원본 PDF의 서로 다른 native bbox에
+연결되는 것을 결과 PNG에서 확인했다. 이는 assistant의 시각적 검토이며 사람 verified 평가는 아니다.
+
+초기 Markdown/array JSON 실패, 잘못된 symbol/block ID, knowledge ID 오류, figure target_text 오류를
+삭제하지 않고 이전 run에 보존했다. 세부 내역은 `visual_grounding.md`에 있다.
+최종 backend 408 passed, frontend 25 passed/build 통과. OCR 정확도·실강의 A/B·semantic entailment·
+PDF 필기의 최종 가독성 개선은 여전히 미측정이다. 이 작은 fixture는 prompt 개발에도 사용했다.

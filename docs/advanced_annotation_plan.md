@@ -76,3 +76,40 @@ Phase B 실제 측정과 게이트 상태는 `gpu_benchmark.md`를 기준으로 
 **A/B 실행 기반 완료, C–F 미완료.** C의 element-ID 검증과 좌표 변환부터 시작해야 한다.
 이 clone에는 실강의 원본이 없어 실제 강의 A/B/사람 verified 품질 비교는 수행하지 못했다.
 현재 VLM 진단 결과를 production 필기 좌표로 직접 사용하지 않는다.
+
+## Phase C — SSD 환경 인수 및 구현 계획 (2026-11-06)
+
+- 시작 `b6903b4`, clean main. A/B는 이미 commit/push되어 있고 재구현하지 않는다.
+- SSD cache `models/huggingface`, 기존 `data/vlm-runs/ssd-smoke/report.json` 확인:
+  completed_requires_visual_review, 실제 2회/schema 2/2, OOM 0. 모델 재다운로드 없음.
+- 기존 word/line/block/figure ID, `extract_pdf`, `add_geometry`, `render_marked_page`를 재사용.
+  회전된 PDF의 기존 추출은 rotated page 크기와 unrotated text 좌표가 섞일 수 있으므로
+  원본을 수정하지 않는 unrotated 작업 복사본에서 geometry를 얻고 명시적 회전/crop transform을 저장.
+- 독립 element registry에 PDF/OCR provenance와 geometry hash를 보존. 수식은 기존 line ID에
+  deterministic type hint를 붙이며 모델이 새 기호/좌표를 생성하지 않게 한다.
+- 기존 단일 GPU worker에 `select_targets`를 추가하고 선택은 registry의 canonical ID만 허용.
+  음성 segment 인용/시간, PDF text, mentions/block 관계, page/viewport/confidence/ambiguity를 검증.
+- 실제 8B 원본 이미지 vs SoM 이미지 비교 CLI와 선택 결과 PNG/JSON을 생성한다.
+  합성 fixture의 기대 ID와 자동 비교는 사람 verified 품질 평가와 구분한다.
+- 잘못된 ID/bbox/marker, 회전·crop·축소, 수식 기호, 이미지형/혼합 언어, cache 무효화,
+  기존 VLM/API/page audio/Rich Notes 회귀 검증. production planner 기본값은 유지한다.
+
+Phase C 실행 결과는 이후 기록하며 `.env`/기존 data/모델/lockfile과 Git 변경을 보존한다.
+
+### Phase C 결과
+
+- `app/grounding/` registry/좌표/선택 schema·검증, `GPUWorkerProvider.select_targets`,
+  `scripts/ground_page.py` 구현. SSD 기본 경로 사용, 추가 모델 다운로드 없음.
+- 기존 PDF/word/line/figure/SoM 렌더 재사용, 수식 내부 minus 누락 수정,
+  compound `∇L` 내부 `∇` native character ID 추가. OCR/native 데이터 분리.
+- 실제 최종 14회(original/SoM 각 7) 모두 JSON schema 통과, OOM 0.
+  단어·α·수식·∇·그림 각 5개 positive ID는 양쪽에서 일치.
+  없는 β와 반복 θ는 accepted 좌표 없이 거부/미매칭/모호함으로 남김.
+- 모델 raw 기대 일치는 original 5/7, SoM 6/7, 검증 후 양쪽 7/7.
+  prompt 개발에 사용한 작은 synthetic fixture이므로 일반 품질 향상으로 주장하지 않는다.
+- 원본·SoM·선택 결과 PNG/JSON 실제 확인. 기록: `data/grounding-runs/phase-c-01`–`phase-c-06`.
+- backend 408 passed (39.27s), 관련 51 passed, frontend 25 passed/build 통과.
+  기존 Windows FFMPEG_PATH는 .env 보존 후 테스트 process에서만 Ubuntu 경로 지정.
+
+Phase C core/실제 ID 선택 및 검토 경로 완료. production API/planner 연결, 실제 강의 gold와
+복잡한 문서/OCR 품질 검증은 남아 있다. 상세 설계·재실행·실패 기록은 `visual_grounding.md` 참고.
