@@ -65,6 +65,7 @@ def consolidate(
                 gutter=gutter_width(page.width),
                 notes=[
                     Annotation(
+                        content_id=note.content_id,
                         id=note_id,
                         block_ids=note.block_ids,
                         bboxes=[blocks[block_id].bbox for block_id in note.block_ids],

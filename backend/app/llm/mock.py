@@ -108,6 +108,15 @@ class MockProvider(LLMProvider):
         if not marker:
             return json.dumps({"ok": True})  # A connection check, not a request for notes.
         request = json.loads(payload)
+        if request.get("task") == "content_extraction":
+            return json.dumps({"items": [
+                {"type": "explanation", "title": sentence[:60], "content": sentence,
+                 "source_quote": sentence, "short_note": _condense(sentence, _language(sentence)),
+                 "block_ids": note["block_ids"],
+                 "importance": 3, "language": note["language"]}
+                for note in self._span_notes(request)
+                for sentence in [note["quote"]]
+            ]}, ensure_ascii=False)
         if "spans" in request:
             sample = request.get("lecture_sample", "")
             notes = [

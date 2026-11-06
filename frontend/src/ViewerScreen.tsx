@@ -4,6 +4,9 @@ import {
   audioUrl,
   getAnnotations,
   getPageAudio,
+  getDetailedNotes,
+  type DetailedNotes,
+  type Density,
   pdfUrl,
   type Annotation,
   type Annotations,
@@ -37,6 +40,10 @@ function pageAtFirstSpeech(pageAudio: PageAudio) {
 
 export function ViewerScreen({ jobId }: { jobId: string }) {
   const [annotations, setAnnotations] = useState<Annotations | null>(null)
+  const [detailed, setDetailed] = useState<DetailedNotes | null>(null)
+  const [detailStatus, setDetailStatus] = useState('상세 노트 불러오는 중…')
+  const [density, setDensity] = useState<Density>('balanced')
+  const [densityError, setDensityError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pageCount, setPageCount] = useState(0)
   const [page, setPage] = useState(1)
@@ -52,9 +59,29 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
   const currentDotRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
+    let cancelled = false
+    setDetailed(null)
+    setDetailStatus('상세 노트 불러오는 중…')
+    void getDetailedNotes(jobId).then((value) => {
+      if (!cancelled) { setDetailed(value); setDetailStatus('') }
+    }).catch((failure: Error) => { if (!cancelled) setDetailStatus(failure.message) })
+    return () => { cancelled = true }
+  }, [jobId])
+
+  useEffect(() => {
+    let cancelled = false
+    setDensityError(null)
+    void getAnnotations(jobId, density).then((value) => {
+      if (!cancelled) setAnnotations(value)
+    }).catch((failure: Error) => { if (!cancelled) setDensityError(failure.message) })
+    return () => { cancelled = true }
+  }, [jobId, density])
+
+  useEffect(() => {
     // Slides and audio work without notes, and notes work without page audio.
+    let cancelled = false
     void Promise.allSettled([getAnnotations(jobId), getPageAudio(jobId)]).then(([notes, audio]) => {
-      if (notes.status === 'fulfilled') setAnnotations(notes.value)
+      if (cancelled) return
       if (audio.status === 'fulfilled') setPageAudio(audio.value)
       // Open where the lecture starts, not on a title slide that may never be discussed.
       const heard = audio.status === 'fulfilled' ? audio.value : null
@@ -63,6 +90,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
       const opening = first ?? noted
       if (opening) setPage(opening)
     })
+    return () => { cancelled = true }
   }, [jobId])
 
   const pageAnnotations = useMemo(
@@ -112,7 +140,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLInputElement) return
+      if (event.target instanceof HTMLElement && event.target.closest('input, select, textarea, button, summary, [contenteditable]')) return
       if (event.key === ' ' && !(event.target instanceof HTMLButtonElement)) {
         event.preventDefault()
         togglePlayback()
@@ -152,6 +180,14 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
           </button>
         </div>
         <div className="toolbar-actions">
+          <label>필기 밀도{' '}
+            <select aria-label="필기 밀도" value={density} disabled={!detailed}
+              onChange={(event) => setDensity(event.target.value as Density)}>
+              <option value="minimal">핵심</option>
+              <option value="balanced">균형</option>
+              <option value="detailed">풍부</option>
+            </select>
+          </label>
           <label className="switch">
             <input
               type="checkbox"
@@ -171,7 +207,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
           <a className="button" href={`#/jobs/${jobId}/debug`}>
             정렬 결과
           </a>
-          <a className="button" href={annotatedPdfUrl(jobId)} download="annotated.pdf">
+          <a className="button" href={annotatedPdfUrl(jobId, density)} download="annotated.pdf">
             annotated.pdf 다운로드
           </a>
         </div>
@@ -219,6 +255,28 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
       {showNotes && (
         <aside className="notes-pane">
           <h2>{page}쪽 노트</h2>
+          {densityError && <p role="alert">{densityError}</p>}
+          <section aria-label="상세 학습 노트" className="detailed-notes">
+            <h3>상세 학습 노트</h3>
+            {detailStatus && <p role="status">{detailStatus}</p>}
+            {detailed && !detailed.complete && <p role="status">일부 구간은 아직 추출되지 않았습니다.</p>}
+            {detailed && !detailed.items.some((item) => item.page === page) && <p>이 페이지의 상세 설명이 없습니다.</p>}
+            {detailed?.items.filter((item) => item.page === page).map((item) => (
+              <article key={item.id} lang={item.language}
+                className={notes.some((note) => note.id === selectedId && note.content_id === item.id) ? 'selected-content' : ''}>
+                <h4>{item.title}</h4>
+                <p style={{ whiteSpace: 'pre-wrap' }}>{item.content}</p>
+                {item.confidence < 0.3 && <p className="muted">페이지 연결을 확인해 주세요.</p>}
+                {hasAudio && <button onClick={() => {
+                  setFollow(false)
+                  const linked = notes.find((note) => note.content_id === item.id)
+                  setSelectedId(linked?.id ?? null)
+                  player.playLecture(item.start)
+                }}>▶ {formatTime(item.start)}–{formatTime(item.end)}</button>}
+                <details><summary>발화 근거</summary><blockquote>{item.source_quote}</blockquote></details>
+              </article>
+            ))}
+          </section>
           {error && (
             <p className="error" role="alert">
               {error}

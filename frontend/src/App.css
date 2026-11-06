@@ -1043,6 +1043,25 @@ button:disabled {
   cursor: pointer;
 }
 
+.detailed-notes article {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.detailed-notes h4 {
+  margin: 0 0 8px;
+}
+
+.selected-content {
+  border-left: 3px solid currentColor;
+  padding-left: 8px !important;
+}
+
+.detailed-notes p {
+  line-height: 1.7;
+}
+
 @media (max-width: 800px) {
   .dropzones {
     grid-template-columns: 1fr;

@@ -18,6 +18,7 @@ export interface Sketch {
 }
 
 export interface Annotation {
+  content_id?: string | null
   id: string
   block_ids: string[]
   bboxes: [number, number, number, number][]
@@ -105,7 +106,27 @@ export interface JobStatus {
 
 export const pdfUrl = (jobId: string) => `/api/jobs/${jobId}/pdf`
 export const audioUrl = (jobId: string) => `/api/jobs/${jobId}/audio`
-export const annotatedPdfUrl = (jobId: string) => `/api/jobs/${jobId}/annotated.pdf`
+export type Density = 'minimal' | 'balanced' | 'detailed'
+export interface ContentItem {
+  id: string
+  page: number
+  type: string
+  title: string
+  content: string
+  source_quote: string
+  start: number
+  end: number
+  language: string
+  confidence: number
+}
+export interface DetailedNotes {
+  items: ContentItem[]
+  complete: boolean
+}
+export const getDetailedNotes = (jobId: string) =>
+  getJson<DetailedNotes>(`/api/jobs/${jobId}/detailed-notes`)
+export const annotatedPdfUrl = (jobId: string, density: Density = 'balanced') =>
+  `/api/jobs/${jobId}/annotated.pdf?density=${density}`
 
 async function errorMessage(response: Response): Promise<string> {
   try {
@@ -158,5 +179,5 @@ export const finishLiveJob = (jobId: string) => postForm(`/api/jobs/${jobId}/fin
 export const getStatus = (jobId: string) => getJson<JobStatus>(`/api/jobs/${jobId}`)
 export const getAlignment = (jobId: string) => getJson<Alignment>(`/api/jobs/${jobId}/debug`)
 export const getPageAudio = (jobId: string) => getJson<PageAudio>(`/api/jobs/${jobId}/page-audio`)
-export const getAnnotations = (jobId: string) =>
-  getJson<Annotations>(`/api/jobs/${jobId}/annotations`)
+export const getAnnotations = (jobId: string, density: Density = 'balanced') =>
+  getJson<Annotations>(`/api/jobs/${jobId}/annotations?density=${density}`)

@@ -540,7 +540,9 @@ def test_full_pipeline_with_mocks_keeps_language_and_technical_terms(tmp_path):
     notes = [item for page in annotations.pages for item in page.notes]
     assert notes
     assert len(annotations.pages) <= len(SLIDES)
-    assert all(len(page.notes) <= 5 for page in annotations.pages)
+    detailed = json.loads((pipeline.job_dir(job_id) / "detailed_notes.json").read_text(encoding="utf-8"))
+    content_ids = {item["id"] for item in detailed["items"]}
+    assert all(item.content_id in content_ids for item in notes)
     assert all(item.end > item.start for item in notes)
 
     for item in notes:

@@ -16,6 +16,9 @@ from app.pipeline import run as pipeline
 from app.pipeline.export_pdf import EXPORT_NAME
 from app.pipeline.live import LiveSession
 from app.pipeline.stt import FASTER_WHISPER_MODELS
+from app.pipeline.rich_notes import Density
+from app.cache import hash_file
+from app.pipeline.export_pdf import export_annotated_pdf
 
 log = logging.getLogger(__name__)
 
@@ -172,10 +175,27 @@ def _serve(job_id: str, name: str, media_type: str, not_ready: str) -> FileRespo
 
 
 @router.get("/{job_id}/annotations")
-def get_annotations(job_id: str) -> FileResponse:
+def get_annotations(job_id: str, density: Density | None = None):
+    folder = _folder(job_id)
+    if (folder / pipeline.CONTENT_NAME).exists():
+        try:
+            return pipeline.density_annotations(job_id, density or "balanced")
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
     return _serve(
         job_id, pipeline.ANNOTATIONS_NAME, "application/json", "노트가 아직 준비되지 않았습니다."
     )
+
+
+@router.get("/{job_id}/detailed-notes")
+def get_detailed_notes(job_id: str):
+    folder = _folder(job_id)
+    if not (folder / pipeline.CONTENT_NAME).exists():
+        raise HTTPException(404, "상세 노트가 없습니다. notes 단계부터 다시 실행해 주세요.")
+    try:
+        return pipeline.read_detailed_notes(job_id)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
 
 
 @router.get("/{job_id}/page-audio")
@@ -199,9 +219,25 @@ def get_audio(job_id: str) -> FileResponse:
 
 
 @router.get("/{job_id}/annotated.pdf")
-def get_annotated_pdf(job_id: str) -> FileResponse:
+def get_annotated_pdf(job_id: str, density: Density | None = None) -> FileResponse:
     """Live jobs skip the export, to show notes sooner, so it's made on first request."""
     folder = _folder(job_id)
+    if (folder / pipeline.CONTENT_NAME).exists():
+        density = density or "balanced"
+        try:
+            annotations = pipeline.density_annotations(job_id, density)
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        import hashlib
+        fingerprint = hashlib.sha256((hash_file(folder / pipeline.CONTENT_NAME)
+                      + hash_file(folder / pipeline.EXTRACTION_NAME)
+                      + hash_file(folder / pipeline.PDF_NAME)
+                      + get_settings().note_font + density + "planner-v1").encode()).hexdigest()[:20]
+        target = folder / f"annotated-{density}-{fingerprint}.pdf"
+        if not target.exists():
+            export_annotated_pdf(folder / pipeline.PDF_NAME,
+                                 annotations, target)
+        return FileResponse(target, media_type="application/pdf")
     if not (folder / EXPORT_NAME).exists() and (folder / pipeline.ANNOTATIONS_NAME).exists():
         pipeline.export_job(job_id)
     return _serve(job_id, EXPORT_NAME, "application/pdf", "annotated.pdf가 아직 준비되지 않았습니다.")

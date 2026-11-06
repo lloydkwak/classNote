@@ -32,6 +32,7 @@ class AlignConfig:
     next_page_penalty: float = 0.2
     skip_penalty_per_page: float = 0.4
     back_penalty: float = 1.0
+    back_penalty_per_page: float = 0.2
     off_topic_threshold: float = -2.5
 
     @classmethod
@@ -41,6 +42,7 @@ class AlignConfig:
             "next_page_penalty": "ALIGN_NEXT_PAGE_PENALTY",
             "skip_penalty_per_page": "ALIGN_SKIP_PENALTY_PER_PAGE",
             "back_penalty": "ALIGN_BACK_PENALTY",
+            "back_penalty_per_page": "ALIGN_BACK_PENALTY_PER_PAGE",
             "off_topic_threshold": "ALIGN_OFF_TOPIC_THRESHOLD",
         }
         overrides = {
@@ -56,7 +58,9 @@ def transition_penalties(page_count: int, config: AlignConfig) -> np.ndarray:
         for target in range(page_count):
             distance = target - source
             if distance < 0:
-                penalties[source, target] = config.back_penalty
+                penalties[source, target] = (
+                    config.back_penalty + (abs(distance) - 1) * config.back_penalty_per_page
+                )
             elif distance >= 1:
                 penalties[source, target] = (
                     config.next_page_penalty + (distance - 1) * config.skip_penalty_per_page

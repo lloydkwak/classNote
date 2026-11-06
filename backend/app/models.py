@@ -146,6 +146,7 @@ class Span(BaseModel):
 
 
 class Note(BaseModel):
+    content_id: str | None = None
     page: int
     block_ids: list[str]  # Empty means a page-level note.
     type: NoteType
@@ -181,6 +182,7 @@ class Sketch(BaseModel):
 
 
 class Annotation(BaseModel):
+    content_id: str | None = None
     id: str
     block_ids: list[str]
     bboxes: list[BBox]
@@ -202,6 +204,7 @@ class PageAnnotations(BaseModel):
 
 
 class Annotations(BaseModel):
+    planning: list[dict] = []
     job_id: str
     pages: list[PageAnnotations]
     note_font: str = "pretendard"  # Both renderers must use the font the layout measured.

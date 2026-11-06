@@ -198,7 +198,7 @@ def test_penalty_shape():
     assert penalties[1, 1] == 0
     assert penalties[1, 2] == pytest.approx(0.2)
     assert penalties[0, 3] == pytest.approx(1.0)
-    assert penalties[3, 0] == pytest.approx(1.0)
+    assert penalties[3, 0] == pytest.approx(1.4)
     assert penalties[3, 2] == pytest.approx(1.0)
 
 

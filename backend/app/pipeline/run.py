@@ -11,9 +11,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from app.config import get_settings
+from app.cache import hash_file
 from app.models import Alignment, Annotations, Note, PageAudio, PdfExtraction, Segment, Window
 from app.pipeline.audio import convert_to_mp3
-from app.pipeline.block_align import generate_notes
 from app.pipeline.consolidate import consolidate
 from app.pipeline.figure_caption import caption_figures
 from app.pipeline.export_pdf import EXPORT_NAME, export_annotated_pdf
@@ -23,6 +23,7 @@ from app.pipeline.mentions import find_mentions
 from app.pipeline.pdf_extract import add_geometry, extract_pdf
 from app.pipeline.stt import transcribe
 from app.pipeline.windowing import build_windows
+from app.pipeline.rich_notes import DetailedNotes, Density, extract_content, plan_annotations, planning_report
 
 JOB_OPTIONS_NAME = "job.json"
 PDF_NAME = "input.pdf"
@@ -35,6 +36,7 @@ ALIGNMENT_NAME = "alignment.json"
 PAGE_AUDIO_NAME = "page_audio.json"
 MENTIONS_NAME = "mentions.json"
 NOTES_NAME = "notes.json"
+CONTENT_NAME = "detailed_notes.json"
 NOTES_COMPLETE_NAME = "notes_complete.json"
 ANNOTATIONS_NAME = "annotations.json"
 REPLACE_ATTEMPTS = 10
@@ -109,6 +111,7 @@ def _step_window(folder: Path) -> None:
 def _step_align(folder: Path) -> None:
     alignment = align_windows(_read_list(folder / WINDOWS_NAME, Window), _read_extraction(folder))
     (folder / ALIGNMENT_NAME).write_text(alignment.model_dump_json(indent=2), encoding="utf-8")
+    _step_page_audio(folder)
 
 
 def _write_atomically(path: Path, text: str) -> None:
@@ -148,21 +151,30 @@ def _step_evidence(folder: Path) -> None:
 
 
 def _step_notes(folder: Path) -> None:
-    notes, complete = generate_notes(
+    content = extract_content(
         _read_alignment(folder),
         _read_extraction(folder),
         _read_list(folder / SEGMENTS_NAME, Segment),
     )
+    content.alignment_hash = hash_file(folder / ALIGNMENT_NAME)
+    content.extraction_hash = hash_file(folder / EXTRACTION_NAME)
+    _write_atomically(folder / CONTENT_NAME, content.model_dump_json(indent=2))
+    notes = plan_annotations(content, _read_extraction(folder), "balanced")
+    complete = content.complete
     _write_models(folder / NOTES_NAME, notes)
     (folder / NOTES_COMPLETE_NAME).write_text(json.dumps(complete), encoding="utf-8")
 
 
 def _step_consolidate(folder: Path) -> None:
+    notes = _read_list(folder / NOTES_NAME, Note)
     annotations = consolidate(
-        _read_list(folder / NOTES_NAME, Note), _read_extraction(folder), folder.name
+        notes, _read_extraction(folder), folder.name,
+        max_notes_per_page=len(notes) if (folder / CONTENT_NAME).exists() else 5,
     )
     complete = json.loads((folder / NOTES_COMPLETE_NAME).read_text(encoding="utf-8"))
     annotations.incomplete = not complete
+    if (folder / CONTENT_NAME).exists():
+        annotations.planning = planning_report(read_detailed_notes(folder.name), annotations, "balanced")
     _write_atomically(folder / ANNOTATIONS_NAME, annotations.model_dump_json(indent=2))
 
 
@@ -209,6 +221,29 @@ def read_annotations(job_id: str) -> Annotations:
     return Annotations.model_validate_json(path.read_text(encoding="utf-8"))
 
 
+def density_annotations(job_id: str, density: Density) -> Annotations:
+    folder = job_dir(job_id)
+    content_path = folder / CONTENT_NAME
+    if not content_path.exists():
+        return read_annotations(job_id)
+    content = read_detailed_notes(job_id)
+    extraction = _read_extraction(folder)
+    notes = plan_annotations(content, extraction, density)
+    annotations = consolidate(notes, extraction, job_id, max_notes_per_page=len(notes))
+    annotations.incomplete = not content.complete
+    annotations.planning = planning_report(content, annotations, density)
+    return annotations
+
+
+def read_detailed_notes(job_id: str) -> DetailedNotes:
+    folder = job_dir(job_id)
+    content = DetailedNotes.model_validate_json((folder / CONTENT_NAME).read_text(encoding="utf-8"))
+    if (content.alignment_hash != hash_file(folder / ALIGNMENT_NAME)
+            or content.extraction_hash != hash_file(folder / EXTRACTION_NAME)):
+        raise ValueError("정렬이 변경되었습니다. notes 단계부터 다시 실행해 주세요.")
+    return content
+
+
 def export_job(job_id: str) -> None:
     _step_export(job_dir(job_id))
 
@@ -216,9 +251,6 @@ def export_job(job_id: str) -> None:
 def read_page_audio(job_id: str) -> PageAudio:
     """Older jobs and talks still being recorded have no file, so derive it from the alignment."""
     folder = job_dir(job_id)
-    path = folder / PAGE_AUDIO_NAME
-    if path.exists():
-        return PageAudio.model_validate_json(path.read_text(encoding="utf-8"))
     return build_page_audio(_read_alignment(folder))
 
 
