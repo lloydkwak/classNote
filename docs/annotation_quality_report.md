@@ -1,4 +1,95 @@
-# Advanced annotation quality — Phase A/B
+# Advanced annotation quality — Phase D (2026-11-06)
+
+## 현재 검증 범위
+
+production `run_pipeline`의 opt-in notes→실제 8B→action→PDF export 경로를 검증했다.
+실강의 PDF/audio는 현재 clone에 없었다. 아래 Phase D 입력은 **합성 PDF/무음 WAV와
+고정 STT·정렬·semantic provider**이며, Qwen3-VL NF4 호출만 실제 모델이다.
+독립 사람 평가, 실강의 STT/내용 추출 정확도, semantic coverage와 대규모 A/B는 미검증이다.
+
+### 실제 산출물
+
+최종 통합 실행: `data/phase-d-runs/gpu-e2e-03/`.
+
+- `annotated.pdf`, `preview.png`: 실제 production export 및 Poppler 렌더. PNG를 직접 확인했다.
+- `evidence_graph.json`, `grounding_results.json`, `annotation_actions.json`, `metrics.json`, `report.json`.
+- 원본/작업 데이터: 같은 폴더의 `fixture/`, `state/jobs/phase-d-synthetic/`.
+- 실제 복구 검증: `data/phase-d-runs/gpu-recovery-01/report.json`.
+
+| 측정 (최종 통합 run) | 결과 |
+|---|---|
+| 추출 후보 / 기존 근거 검증 통과 | 8 / 7; `source_quote_not_found` 1 |
+| 근거 검증 pass rate (이 fixture 후보 분모만) | 87.5% |
+| grounding 실제 시도 / accepted / rejected / ambiguous / unmatched | 7 / 5 / 1 / 1 / 0 |
+| 생성 action / 선택 / 렌더 / distinct knowledge | 7 / 7 / 7 / 7 |
+| 상세 노트 보존 | 검증된 7개 모두 보존; 거절된 추출 1개는 validation에 기록 |
+| density 및 notes resume | 추가 worker 없이 재사용; manifest 동일 |
+| OOM / 재시도 (정상 통합) | 0 / 0 |
+| raw provider cache hit | 0; 완료 manifest resume는 별도로 추론 없이 재사용 |
+| model load / 평균 generate | 9.832s / 2.192s |
+| 첫 요청 / 후속 generate 범위 | 첫 generate 2.331s; 후속 1.998–2.490s (load 제외) |
+| grounding 전체 / 검증 runner 전체 | 28.521s / 29.138s |
+| sampled device VRAM peak / 평균 | 7,764,705,280 / 5,611,511,867.8 bytes (7.23 / 5.23 GiB) |
+| torch peak allocated / reserved | 7,240,175,616 / 7,465,861,120 bytes |
+| worker process peak RSS / system used RAM peak | 약 5.58 GiB / 23,668,539,392 bytes; system 값은 다른 프로세스·tmpfs 포함 |
+| 모델 / 설정 | Qwen3-VL-8B-Instruct pinned revision; NF4 double, SDPA, batch 1 |
+| 이미지 / 예산 | 1440×810 → 965×543; max pixels 524288, input 4096, output 512 |
+
+숫자는 강의 전체 coverage나 인간 기준 정확도가 아니다. `lecture_semantic_coverage`와
+`human_target_accuracy`는 null이다. 모든 item importance가 5인 작은 fixture이므로
+minimal/balanced/detailed 렌더 수가 모두 7이다. 일반 자료에서 수량이 같다는 의미는 아니다.
+개발 중 통합 실행 `gpu-e2e-01/02/03` 각각 실제 완료 추론 7회, 복구 run 완료 3회로
+총 완료 추론 24회다. 복구 run에는 별도로 timeout/cancel 중단 요청 2개와 의도적 OOM 1개가 있다.
+
+### 정확한 연결과 안전한 거절
+
+| 항목 | 실제 canonical target / 처리 |
+|---|---|
+| gradient 정의 | `p1_w4`, underline |
+| α 역할 | `p1_w13`, circle |
+| parameter update 수식 | `p1_l2`, bracket |
+| ∇ (∇L 내부) | `p1_w14_c0`, native character circle |
+| Loss curve | `p1_b5`, figure circle + 설명; block 연관만 확인 |
+| 슬라이드에 없는 β | `unsupported_target`, target null, page note |
+| 반복 θ | `ambiguous_repeated_text`, target null, page note |
+
+PNG 검토에서 단어 underline과 α/∇의 개별 강조, 수식 bracket, 그림 연결은 의도한 영역에 있다.
+없는 β/반복 θ에 확정 mark/connector를 그리지 않았다. 원본 슬라이드를 지우거나 수정하지 않는다.
+다만 **수식 주변 connector가 교차하고, 큰 figure circle이 캡션과 겹친다**. 이는 기존 layout의
+한계다. Text occlusion/overlap/readability를 0 또는 개선율로 수치화하지 않았다. Phase E 대상이다.
+figure 내용의 의미 정확성을 accepted block 연결만으로 입증하지 않았다.
+
+회전 0/90/180/270 + crop은 별도 deterministic 테스트에서 원본 빨간 도형의 export 위치
+(1 PDF point 이내), canonical word display geometry, 실제 PDF ink vertices와 provenance를 검증했다.
+실제 GPU의 회전된 슬라이드 선택 정확도를 평가한 것은 아니다.
+
+`source_quote_not_found`는 의도적으로 넣은 미발화 문장 1개다. 기존 검증을 완화하지 않았다.
+이전 컴퓨터의 중요한 실제 항목 탈락은 원본이 없어 재현하지 못했다. grounding 단계에서
+이미 검증된 item을 추가로 삭제하지 않는 것을 실패/예산/OOM mock 및 실제 export로 확인했다.
+
+### 실제 GPU 복구와 회귀
+
+실제 warm worker의 50ms timeout/cancel 각각 `worker_timeout`/`worker_cancelled`, 프로세스 정리 성공.
+각 close 후 device memory는 10 MiB였다. 다음 새 worker로 정상 추론 성공.
+전체 VRAM 크기의 allocation을 8B 로딩 상태에서 시도한 **명시적 benchmark OOM 1회**는
+worker 재시작 및 pixels 262144/output 256/input 2048의 기존 축소 정책으로 복구됐다.
+복구 run 종료 직후 13 MiB, 후속 확인 10 MiB. 다른 GPU 프로세스를 종료하지 않았다.
+이 probe는 production에서 자동 활성화되지 않는다.
+
+최종 backend **432 passed, 0 failed (44.40s)**: 이전 408 + 새 24 cases.
+frontend **25 passed, 0 failed**, Node 22.23.4. TypeScript/Vite build passed (기존 큰 chunk 경고).
+새 테스트는 source/registry/mentions/graph/action/실제 export, density/style/부분·완료 resume,
+API 출처/시간·409·page audio, budget/OOM/VLM 장애 fallback, IPC interpreter/경로/timeout/cancel,
+v2 versioned mentions, crop/rotation ink, STT lease/unload를 포함한다.
+backend 일반 테스트의 모델은 mock이며 위 실제 GPU 보고서와 구분한다.
+live 및 page playback의 기존 회귀가 통과했지만 실제 브라우저 오디오 이벤트는 수동 검증하지 않았다.
+
+재현 명령과 스키마: [Ubuntu runbook](ubuntu_vlm.md), [Evidence Graph](evidence_graph.md).
+Phase F 동일 **실강의** A/B 및 사람 정답은 아직 없다. 단순 모델 추가를 품질 개선 증거로 보고하지 않는다.
+
+---
+
+# 과거 기록 — Phase A/B
 
 ## 보고 범위
 

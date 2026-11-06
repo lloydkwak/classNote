@@ -48,7 +48,8 @@ def job_dir(job_id: str) -> Path:
 
 
 def create_job(
-    pdf: Path, audio: Path | None, job_id: str | None = None, stt_model: str | None = None
+    pdf: Path, audio: Path | None, job_id: str | None = None, stt_model: str | None = None,
+    visual_grounding: bool | None = None,
 ) -> str:
     """Copy the inputs into a new job folder and return its id."""
     job_id = job_id or uuid.uuid4().hex[:12]
@@ -57,7 +58,8 @@ def create_job(
     shutil.copyfile(pdf, folder / PDF_NAME)
     if audio is not None:
         shutil.copyfile(audio, folder / f"{AUDIO_SOURCE_PREFIX}{audio.suffix.lower()}")
-    (folder / JOB_OPTIONS_NAME).write_text(json.dumps({"stt_model": stt_model}), encoding="utf-8")
+    (folder / JOB_OPTIONS_NAME).write_text(json.dumps({"stt_model": stt_model,
+        "visual_grounding":get_settings().visual_grounding if visual_grounding is None else visual_grounding}), encoding="utf-8")
     return job_id
 
 
@@ -82,7 +84,11 @@ def _read_extraction(folder: Path) -> PdfExtraction:
 
 
 def _step_extract(folder: Path) -> None:
-    extraction = extract_pdf(folder / PDF_NAME)
+    if _grounding_enabled(folder):
+        from app.grounding.document import extract_display_pdf
+        extraction=extract_display_pdf(folder/PDF_NAME)
+    else:
+        extraction = extract_pdf(folder / PDF_NAME)
     (folder / EXTRACTION_NAME).write_text(
         extraction.model_dump_json(indent=2), encoding="utf-8"
     )
@@ -99,7 +105,10 @@ def _step_caption(folder: Path) -> None:
 def _step_transcribe(folder: Path) -> None:
     sources = sorted(folder.glob(f"{AUDIO_SOURCE_PREFIX}.*"))
     audio = convert_to_mp3(sources[0], folder / AUDIO_NAME) if sources else None
-    segments = transcribe(audio, _read_extraction(folder).key_terms, _job_stt_model(folder))
+    if _grounding_enabled(folder):
+        segments = transcribe(audio, _read_extraction(folder).key_terms, _job_stt_model(folder),serialize_gpu=True)
+    else:
+        segments = transcribe(audio, _read_extraction(folder).key_terms, _job_stt_model(folder))
     _write_models(folder / SEGMENTS_NAME, segments)
 
 
@@ -116,7 +125,7 @@ def _step_align(folder: Path) -> None:
 
 def _write_atomically(path: Path, text: str) -> None:
     """Replace a file that may be read at any moment, as live annotations are."""
-    temporary = path.with_suffix(".tmp")
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     temporary.write_text(text, encoding="utf-8")
     for attempt in range(REPLACE_ATTEMPTS):
         try:
@@ -142,12 +151,24 @@ def _step_evidence(folder: Path) -> None:
     if get_settings().annotation_engine != "v2":
         return
     extraction = _read_extraction(folder)
-    add_geometry(folder / PDF_NAME, extraction)
+    if _grounding_enabled(folder):
+        from app.grounding.document import extract_display_pdf
+        geometry=extract_display_pdf(folder/PDF_NAME,geometry=True)
+        for page,source in zip(extraction.pages,geometry.pages):
+            page.words,page.lines,page.free_rects=source.words,source.lines,source.free_rects
+    else:
+        add_geometry(folder / PDF_NAME, extraction)
     (folder / EXTRACTION_NAME).write_text(extraction.model_dump_json(indent=2), encoding="utf-8")
     mentions = find_mentions(
         _read_alignment(folder), extraction, _read_list(folder / SEGMENTS_NAME, Segment)
     )
-    _write_models(folder / MENTIONS_NAME, mentions)
+    if _grounding_enabled(folder):
+        from app.grounding.document import build_registries,registry_fingerprint
+        stored={"schema_version":1,"mentions":[m.model_dump(mode="json") for m in mentions],
+                "registry_hashes":{str(r.page):registry_fingerprint(r) for r in build_registries(folder/PDF_NAME)}}
+        _write_atomically(folder/MENTIONS_NAME,json.dumps(stored,ensure_ascii=False,indent=2))
+    else:
+        _write_models(folder / MENTIONS_NAME, mentions)
 
 
 def _step_notes(folder: Path) -> None:
@@ -158,14 +179,24 @@ def _step_notes(folder: Path) -> None:
     )
     content.alignment_hash = hash_file(folder / ALIGNMENT_NAME)
     content.extraction_hash = hash_file(folder / EXTRACTION_NAME)
+    content.transcript_hash = hash_file(folder / SEGMENTS_NAME)
+    content.pdf_hash = hash_file(folder / PDF_NAME)
+    content.provenance={"visual_grounding":_grounding_enabled(folder)}
     _write_atomically(folder / CONTENT_NAME, content.model_dump_json(indent=2))
-    notes = plan_annotations(content, _read_extraction(folder), "balanced")
+    if content.provenance["visual_grounding"]:
+        from app.pipeline.grounded_notes import prepare_grounding
+        prepare_grounding(folder,content,_read_alignment(folder),_read_list(folder/SEGMENTS_NAME,Segment))
+    notes,_,_ = _plan_notes(folder,content,"balanced")
     complete = content.complete
     _write_models(folder / NOTES_NAME, notes)
     (folder / NOTES_COMPLETE_NAME).write_text(json.dumps(complete), encoding="utf-8")
 
 
 def _step_consolidate(folder: Path) -> None:
+    if (folder/CONTENT_NAME).exists():
+        annotations=density_annotations(folder.name,"balanced")
+        _write_atomically(folder / ANNOTATIONS_NAME, annotations.model_dump_json(indent=2))
+        return
     notes = _read_list(folder / NOTES_NAME, Note)
     annotations = consolidate(
         notes, _read_extraction(folder), folder.name,
@@ -179,6 +210,9 @@ def _step_consolidate(folder: Path) -> None:
 
 
 def _step_export(folder: Path) -> None:
+    if (folder/CONTENT_NAME).exists():
+        export_density(folder.name,"balanced",folder/EXPORT_NAME)
+        return
     annotations = Annotations.model_validate_json(
         (folder / ANNOTATIONS_NAME).read_text(encoding="utf-8")
     )
@@ -228,18 +262,69 @@ def density_annotations(job_id: str, density: Density) -> Annotations:
         return read_annotations(job_id)
     content = read_detailed_notes(job_id)
     extraction = _read_extraction(folder)
-    notes = plan_annotations(content, extraction, density)
+    notes,actions,manifest = _plan_notes(folder,content,density)
     annotations = consolidate(notes, extraction, job_id, max_notes_per_page=len(notes))
     annotations.incomplete = not content.complete
     annotations.planning = planning_report(content, annotations, density)
+    if manifest is not None:
+        from app.pipeline.grounded_notes import save_graph
+        save_graph(folder,content,_read_list(folder/SEGMENTS_NAME,Segment),_read_alignment(folder),
+                   actions,manifest,annotations,density)
+        by_item={a.knowledge_id:a for a in actions}
+        for row in annotations.planning:
+            action=by_item[row["item_id"]]
+            row["grounding"]=action.provenance.model_dump(mode="json")
     return annotations
+
+
+def _grounding_enabled(folder):
+    path=folder/JOB_OPTIONS_NAME
+    options=json.loads(path.read_text()) if path.exists() else {}
+    return bool(options.get("visual_grounding",get_settings().visual_grounding))
+
+
+def _plan_notes(folder,content,density):
+    extraction=_read_extraction(folder)
+    if content.provenance.get("visual_grounding"):
+        from app.pipeline.grounded_notes import plan_grounded
+        return plan_grounded(folder,content,extraction,density)
+    return plan_annotations(content,extraction,density),[],None
+
+
+def export_density(job_id,density,output=None):
+    folder=job_dir(job_id)
+    annotations=density_annotations(job_id,density)
+    import hashlib
+    key=hashlib.sha256((hash_file(folder/PDF_NAME)+annotations.model_dump_json()
+                       +hash_file(Path(__file__).with_name("export_pdf.py"))+"export-v2").encode()).hexdigest()[:20]
+    target=output or folder/f"annotated-{density}-{key}.pdf"
+    digest_path=target.with_suffix(".pdf.sha256")
+    if (not target.exists() or not digest_path.exists()
+            or digest_path.read_text()!=hash_file(target) or output is not None):
+        temporary=target.with_name(f".{target.stem}.{uuid.uuid4().hex}.tmp.pdf")
+        try:
+            export_annotated_pdf(folder/PDF_NAME,annotations,temporary)
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        _write_atomically(digest_path,hash_file(target))
+    content=read_detailed_notes(job_id)
+    if content.provenance.get("visual_grounding"):
+        from app.pipeline.grounded_notes import save_graph
+        _,actions,manifest=_plan_notes(folder,content,density)
+        save_graph(folder,content,_read_list(folder/SEGMENTS_NAME,Segment),_read_alignment(folder),
+                   actions,manifest,annotations,density,
+                   export={"file":target.name,"sha256":hash_file(target),"evidence_revision":annotations.grounding["revision"]})
+    return target
 
 
 def read_detailed_notes(job_id: str) -> DetailedNotes:
     folder = job_dir(job_id)
     content = DetailedNotes.model_validate_json((folder / CONTENT_NAME).read_text(encoding="utf-8"))
     if (content.alignment_hash != hash_file(folder / ALIGNMENT_NAME)
-            or content.extraction_hash != hash_file(folder / EXTRACTION_NAME)):
+            or content.extraction_hash != hash_file(folder / EXTRACTION_NAME)
+            or (content.transcript_hash and content.transcript_hash != hash_file(folder/SEGMENTS_NAME))
+            or (content.pdf_hash and content.pdf_hash != hash_file(folder/PDF_NAME))):
         raise ValueError("정렬이 변경되었습니다. notes 단계부터 다시 실행해 주세요.")
     return content
 

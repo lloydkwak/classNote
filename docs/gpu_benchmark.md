@@ -1,5 +1,8 @@
 # Qwen3-VL 8B GPU benchmark — 2026-11-06
 
+Phase D production 통합 실측은 이 문서 마지막 절과 [현재 품질 보고서](annotation_quality_report.md)를
+참조한다. 아래 SSD smoke 및 A/B/C 수치는 각 단계의 과거 기록이다.
+
 최신 환경: SSD cache `/root/classNote/models/huggingface`, 약 17GB, SSD 여유 약 57GB.
 기존 `data/vlm-runs/ssd-smoke/report.json`은 completed_requires_visual_review, schema 2/2,
 OOM 0, 첫/후속 wall 20.657/2.997s, device peak 8,009,023,488 bytes를 기록한다.
@@ -159,3 +162,32 @@ schema/ID/음성 검증 실패와 전체 이미지 결과는 `visual_grounding.m
 
 Phase C 종료 확인: host `nvidia-smi` 14:07:00 KST, 10 MiB/10240 MiB,
 Xorg만 남고 VLM worker 없음. SSD 가중치는 유지하고 GPU 메모리를 반환했다.
+# Phase D production integration — 2026-11-06
+
+현재 통합 실측은 `data/phase-d-runs/gpu-e2e-03/report.json`, 실제 복구는
+`data/phase-d-runs/gpu-recovery-01/report.json`이다. 기존 모델/SSD cache/격리 환경 재사용.
+아래 A/B/C 과거 실험과 구분한다.
+
+- RTX3080 10240MiB, driver550.163.01. VLM torch2.6.0+cu124, transformers4.57.6,
+  bitsandbytes0.49.0, accelerate1.12.0. checkpoint Qwen/Qwen3-VL-8B-Instruct,
+  revision `0c351dd01ed87e9c1b53cbc748cba10e6187ff3b`, NF4 double quant/SDPA/batch1.
+- Backend `backend/.venv/bin/python`에서 `.venv-vlm/bin/python` IPC 호출을 실제 확인했다.
+  worker_environment.prefix가 모든 요청에서 `/root/classNote/.venv-vlm`이다.
+- 실제7요청, accepted5/rejected1/ambiguous1. 모델 로딩1회9.832s, 평균 generate2.192s,
+  최종 runner29.138s. 입력1209–2090 tokens, 출력69–79 tokens, maxinput4096/output512.
+  이미지1440×810 → 965×543, maxpixels524288. 정확한 요청별 수치는 report.json 참고.
+- sampled device peak7,764,705,280 bytes (7.23GiB), 평균5.23GiB. Torch peak allocated
+  7,240,175,616 bytes/reserved7,465,861,120 bytes. worker peak RSS약5.58GiB.
+  전체 시스템 used RAM peak23,668,539,392 bytes는 다른 프로세스/tmpfs도 포함한다.
+- 정상 통합 OOM0/retry0/cachehit0. density3종과 완료 notes resume는 추가 worker 없이 재사용.
+  부분 resume checkpoint6개 재사용/누락1개 요청은 mock 테스트로 확인했다.
+- 실제 warm timeout/cancel 각각 정리 성공, 신규 worker 정상 추론. 명시적 OOM1회는 기존
+  축소 pixels262144/input2048/output256으로 재시작해 회복했다. close 후 device10–13MiB,
+  후속 확인10MiB. 실제 Whisper GPU 공존은 실행하지 않았다.
+- model unload latency와 긴 실강의 page throughput은 별도로 측정하지 않았다.
+  이 수치는 합성 PDF와 STT/semantic fixture 기반 grounding이며 실강의 품질 근거가 아니다.
+
+최종 산출물·회귀·시각적 오류는 [품질 보고서](annotation_quality_report.md),
+재현은 [Ubuntu runbook](ubuntu_vlm.md) 참고.
+
+---

@@ -16,6 +16,10 @@ class StructuredOutputFailure(ValueError):
         super().__init__("invalid structured output")
 
 
+class InputBudgetExceeded(ValueError):
+    pass
+
+
 class QwenRuntime:
     def __init__(self, config):
         self.config = config
@@ -94,7 +98,7 @@ class QwenRuntime:
         image_grid = grid.tolist() if grid is not None else None
         input_budget = self.config.max_input_tokens // (2 if reduced else 1)
         if input_tokens > input_budget:
-            raise ValueError(f"input tokens {input_tokens} exceed budget {input_budget}; no truncation")
+            raise InputBudgetExceeded(f"input tokens {input_tokens} exceed budget {input_budget}; no truncation")
         inputs = inputs.to("cuda:0")
         infer_start = time.perf_counter()
         self.phase = "generate"

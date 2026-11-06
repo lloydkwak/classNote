@@ -38,3 +38,9 @@ an isolated environment; the existing annotation pipeline remains the service de
 
 Phase C now adds [Set-of-Mark element-ID grounding](docs/visual_grounding.md), with SSD model cache,
 validated speech evidence, original/SoM comparisons, and review PNG/JSON artifacts.
+
+Phase D connects [Evidence Graph and grounded annotations](docs/evidence_graph.md) to the existing
+production notes, density and PDF export paths. Enable per job with the API's `visual_grounding=true`
+or CLI `--visual-grounding`; the service default remains the existing planner. See the
+[Ubuntu runbook](docs/ubuntu_vlm.md) for isolated-worker execution and the
+[quality report](docs/annotation_quality_report.md) for actual synthetic GPU/PDF results and limitations.

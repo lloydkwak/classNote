@@ -1,6 +1,8 @@
 """Speech-to-text behind one interface. Pick a provider with `STT_PROVIDER`."""
 
 import tempfile
+import gc
+from contextlib import contextmanager
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from pathlib import Path
@@ -67,19 +69,43 @@ class FasterWhisperProvider(STTProvider):
         self._compute_type = compute_type
         self._cpu_threads = cpu_threads
         self._decoding = {"beam_size": 1, "temperature": 0.0} if greedy else {}
+        self.serialize_gpu = get_settings().visual_grounding
 
     def _loaded(self):
         return _load_whisper(self.model, self._device, self._compute_type, self._cpu_threads)
 
+    @contextmanager
+    def _session(self):
+        if not self.serialize_gpu or self._device == "cpu":
+            yield self._loaded()
+            return
+        from app.gpu import gpu_lease
+
+        with gpu_lease():
+            model=None
+            try:
+                model=self._loaded()
+                yield model
+            finally:
+                if model is not None:
+                    native=getattr(model,"model",None)
+                    if native is not None and hasattr(native,"unload_model"):
+                        native.unload_model()
+                _load_whisper.cache_clear()
+                gc.collect()
+
     def prepare(self) -> None:
         """Load and run the model once. The first real call was about 12s slower otherwise."""
         silence = np.zeros(SAMPLE_RATE * 2, dtype=np.float32)
-        whisper = self._loaded()
-        for vad_filter in (False, True):  # With and without loading the VAD model.
-            list(whisper.transcribe(silence, vad_filter=vad_filter, language="en", beam_size=1)[0])
+        with self._session() as whisper:
+            for vad_filter in (False, True):  # With and without loading the VAD model.
+                list(whisper.transcribe(silence, vad_filter=vad_filter, language="en", beam_size=1)[0])
 
     def transcribe(self, audio: Path, prompt: str, language: str | None) -> list[Segment]:
-        whisper = self._loaded()
+        with self._session() as whisper:
+            return self._transcribe(whisper,audio,prompt,language)
+
+    def _transcribe(self,whisper,audio,prompt,language):
         segments, _ = whisper.transcribe(
             str(audio),
             **self._decoding,
@@ -191,11 +217,13 @@ def build_prompt(key_terms: list[str]) -> str:
 
 
 def transcribe(
-    audio: Path | None, key_terms: list[str], model: str | None = None
+    audio: Path | None, key_terms: list[str], model: str | None = None, *, serialize_gpu: bool | None = None
 ) -> list[Segment]:
     """Transcribe with the configured provider, using the cache when possible."""
     settings = get_settings()
     provider = get_stt_provider(model)
+    if isinstance(provider,FasterWhisperProvider) and serialize_gpu is not None:
+        provider.serialize_gpu=serialize_gpu
     prompt = build_prompt(key_terms)
     if not provider.needs_audio:
         return provider.transcribe(audio, prompt, settings.stt_language)

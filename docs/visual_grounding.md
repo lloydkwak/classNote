@@ -1,5 +1,10 @@
 # Phase C — Set-of-Mark visual grounding
 
+> 2026-11-06 Phase D 업데이트: 현재 opt-in production notes/API/layout/export까지 연결했다.
+> 아래 CLI/API 수준 설명은 Phase C 당시 범위다. 실제 통합 구조·필드·무효화·fallback은
+> [Evidence Graph](evidence_graph.md), 실측/시각적 한계는
+> [품질 보고서](annotation_quality_report.md)를 우선한다. 기본 경로는 여전히 기존 annotation이다.
+
 ## 구현 범위
 
 `GPUWorkerProvider.select_targets(TargetRequest)`가 실제 Qwen3-VL-8B-Instruct NF4 worker를

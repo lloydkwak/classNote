@@ -170,7 +170,8 @@ def _is_meaningless(block: _RawBlock) -> bool:
         return True
     if not any(char.isalnum() for char in block.text):
         return True
-    return bool(PAGE_NUMBER.match(block.text))
+    # A short assignment such as 'alpha = 1' is not a footer/page number.
+    return "=" not in block.text and bool(PAGE_NUMBER.match(block.text))
 
 
 def _repeat_key(block: _RawBlock) -> tuple:

@@ -1,5 +1,24 @@
 # Technology decisions — 2026-11-06
 
+## 현재 Phase D 결정
+
+기존 Pydantic/JSON, PyMuPDF, Rich Notes planner, Phase C registry/SoM/strict validator,
+Phase B GPUWorkerProvider를 그대로 연결했다. 별도 graph DB와 두 번째 semantic LLM은 없다.
+표준 라이브러리 JSONL subprocess로 backend의 torch2.15 환경과 VLM의 torch2.6/cu124를 격리한다.
+기본은 기존 경로이며 per-job/env opt-in과 항목별 fallback을 제공한다.
+
+좌표는 VLM 생성값이 아니라 canonical ID/registry에서만 가져온다. 기존 underline/circle/bracket/
+connector/margin text만 사용한다. source/registry/model/prompt hash, validation 재검증,
+density와 render cache 분리로 비용을 제어한다. 상세 스키마/실제 정책은 [evidence_graph.md](evidence_graph.md).
+
+Docling/MinerU/새 OCR/graph DB/OR-Tools는 이번 통합에 필요하지 않아 추가 설치하지 않았다.
+대규모 layout solver는 Phase E, 실강의 A/B·사람 gold는 Phase F다. 외부 코드를 새로 복사하거나
+새 오픈소스 라이선스 의존성을 도입하지 않았다. Qwen checkpoint/NF4/SDPA/SSD 캐시는 그대로다.
+GPU STT lease/unload는 opt-in 경로만 대상으로 하고 CPU e5 설정은 유지한다.
+실제 Whisper GPU 실행과 다른 앱까지 포함한 전역 scheduler 전환은 검증 범위 밖이다.
+
+아래는 이전 단계의 결정 기록이다.
+
 ## Dependencies
 
 새 라이브러리를 추가하지 않았다. 기존 e5/NumPy Viterbi, Pydantic, provider/cache,

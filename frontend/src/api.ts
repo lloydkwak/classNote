@@ -18,6 +18,16 @@ export interface Sketch {
 }
 
 export interface Annotation {
+  provenance?: {
+    action_id: string
+    knowledge_id: string
+    source_segment_ids: number[]
+    target_element_id: string | null
+    target_kind: string | null
+    grounding_status: string
+    fallback_reason: string | null
+    registry_fingerprint: string
+  } | null
   content_id?: string | null
   id: string
   block_ids: string[]
@@ -40,6 +50,7 @@ export interface PageAnnotations {
 }
 
 export interface Annotations {
+  grounding?: { status: string; metrics: Record<string, unknown> } | null
   job_id: string
   pages: PageAnnotations[]
   incomplete: boolean

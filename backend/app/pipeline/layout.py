@@ -51,6 +51,7 @@ class LayoutNote:
     text: str
     double: bool  # Underline twice, for exam hints.
     blocks: list[Block]
+    mark: str | None = None
 
 
 def note_font_path(name: str) -> Path:
@@ -197,6 +198,15 @@ def _mark_for(
     kind = "underline"
     for block in note.blocks:
         rect = _block_rect(block, width, height)
+        if note.mark is not None:
+            kind=note.mark
+            if kind=="circle":
+                strokes += _circle(rect,rng)
+            elif kind=="bracket":
+                strokes += _bracket(rect,side,rng)
+            elif kind=="underline":
+                strokes += _underline(rect,note.double,rng)
+            continue
         if block.kind != "figure":
             strokes += _underline(rect, note.double, rng)
             continue
@@ -207,6 +217,8 @@ def _mark_for(
         else:
             kind = "bracket"
             strokes += _bracket(rect, side, rng)
+    if not strokes:
+        return "none",[],None
     near = min if side == "left" else max
     anchor = near(
         (point for stroke in strokes for point in stroke),

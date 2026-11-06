@@ -3,7 +3,7 @@
 from difflib import SequenceMatcher
 
 from app.config import get_settings
-from app.models import Annotation, Annotations, Note, PageAnnotations, PdfExtraction
+from app.models import Annotation, Annotations, Block, Note, PageAnnotations, PdfExtraction
 from app.pipeline.layout import LayoutNote, gutter_width, layout_page
 
 DEFAULT_MAX_NOTES_PER_PAGE = 5
@@ -11,6 +11,8 @@ DUPLICATE_SIMILARITY = 0.7
 
 
 def _is_duplicate(first: Note, second: Note) -> bool:
+    if (first.provenance or second.provenance) and first.content_id != second.content_id:
+        return False
     if first.page != second.page or set(first.block_ids) != set(second.block_ids):
         return False
     ratio = SequenceMatcher(None, first.note.casefold(), second.note.casefold()).ratio()
@@ -42,14 +44,22 @@ def consolidate(
         chosen = sorted(on_page[:max_notes_per_page], key=lambda note: note.start)
         if not chosen:
             continue
-        ids = [f"p{page.page}_n{index}" for index in range(len(chosen))]
+        ids = [note.provenance.action_id if note.provenance else f"p{page.page}_n{index}"
+               for index,note in enumerate(chosen)]
+        def targets(note):
+            if note.target_bboxes is not None:
+                return [Block(block_id=note.provenance.target_element_id or "unanchored",page=note.page,
+                              text="",bbox=box,kind="figure" if note.target_mark in {"circle","bracket"} else "text")
+                        for box in note.target_bboxes]
+            return [blocks[bid] for bid in note.block_ids if bid in blocks]
         sketches = layout_page(
             [
                 LayoutNote(
                     id=note_id,
                     text=note.note,
                     double=note.type == "exam_hint",
-                    blocks=[blocks[block_id] for block_id in note.block_ids],
+                    blocks=targets(note),
+                    mark=note.target_mark,
                 )
                 for note_id, note in zip(ids, chosen)
             ],
@@ -68,7 +78,7 @@ def consolidate(
                         content_id=note.content_id,
                         id=note_id,
                         block_ids=note.block_ids,
-                        bboxes=[blocks[block_id].bbox for block_id in note.block_ids],
+                        bboxes=[block.bbox for block in targets(note)],
                         type=note.type,
                         note=note.note,
                         quote=note.quote,
@@ -76,6 +86,7 @@ def consolidate(
                         start=note.start,
                         end=note.end,
                         sketch=sketch,
+                        provenance=note.provenance,
                     )
                     for note_id, note, sketch in zip(ids, chosen, sketches)
                 ],

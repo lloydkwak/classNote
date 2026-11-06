@@ -4,6 +4,67 @@
 `data/vlm-runs/ssd-smoke/report.json`으로 실제 추론 성공 확인. 아래 RAM tmpfs 설명은
 초기 A/B 실험 기록이다. 현재 실행은 SSD 경로가 기본이며 모델을 다시 다운로드할 필요가 없다.
 
+## Phase D: production opt-in 실행
+
+모델 다운로드/환경 재설치는 필요 없다. 기존 `.env`와 provider 설정을 유지하고 Linux ffmpeg만
+process에서 지정한다. 기본 STT CPU 경로를 권장하며 VLM은 기존 SSD `.venv-vlm`만 사용한다.
+
+```bash
+cd /root/classNote
+# API 새 오프라인 job 기본값 활성화 (기본은 VISUAL_GROUNDING=0)
+FFMPEG_PATH=/usr/bin/ffmpeg VISUAL_GROUNDING=1 \
+  backend/.venv/bin/python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+
+# 또는 개별 job에서만 활성화: 기존 API의 optional multipart field
+curl -F 'pdf=@/path/to/slides.pdf' -F 'audio=@/path/to/lecture.wav' \
+  -F 'visual_grounding=true' http://127.0.0.1:8000/api/jobs
+
+# 기존 CLI: 현재 설정의 STT/LLM을 사용한다 (실제 서비스 호출/시간이 발생할 수 있음)
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/run_pipeline.py \
+  --pdf /path/to/slides.pdf --audio /path/to/lecture.wav --visual-grounding
+
+# 기존 job을 opt-in으로 바꿀 때는 display geometry를 다시 만들도록 extract부터
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/run_pipeline.py \
+  --job-id JOB_ID --from-step extract --visual-grounding
+# 이미 opt-in인 job의 prompt/validation/실패 재처리: STT/정렬을 다시 하지 않음
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/run_pipeline.py \
+  --job-id JOB_ID --from-step notes
+```
+
+`VLM_PYTHON` 기본 `/root/classNote/.venv-vlm/bin/python`, `VLM_TIMEOUT_SECONDS` 기본180이다.
+모델은 pinned 8B/NF4/SDPA, local_files_only이며 `models/huggingface`를 재사용한다.
+출처/상태: 기존 `/annotations?density=balanced`, `/detailed-notes`, `/annotated.pdf?density=balanced`.
+UI 업로드 toggle은 추가하지 않았으며 env 또는 API/CLI로 선택한다. Live mode에는 VLM을
+추가하지 않는다. 상세 필드/실패/무효화 정책은 [Evidence Graph](evidence_graph.md) 참고.
+
+### 합성 production 검증 재현
+
+항상 **새 output 디렉터리**를 사용한다. 기존 사용자 job과 데이터를 덮어쓰지 않는다.
+무음 WAV·STT·alignment·semantic fixture를 쓰고, 기본 실행의 grounding만 실제 8B다.
+
+```bash
+cd /root/classNote
+# CPU mock end-to-end (일반 테스트와 동일하게 모델 다운로드/추론 없음)
+backend/.venv/bin/python backend/scripts/verify_phase_d.py --mock-vlm \
+  --output data/phase-d-runs/YOUR_MOCK_RUN
+# 실제 backend → isolated VLM → notes/action → PDF export + PNG + density/resume 검증
+backend/.venv/bin/python backend/scripts/verify_phase_d.py \
+  --output data/phase-d-runs/YOUR_GPU_RUN
+# 명시적 실제 warm timeout/cancel 및 CUDA allocation OOM/재시작 검증 (운영 job에 실행하지 않음)
+backend/.venv/bin/python backend/scripts/verify_vlm_recovery.py \
+  --run data/phase-d-runs/YOUR_GPU_RUN --output data/phase-d-runs/YOUR_RECOVERY_RUN
+
+cd backend
+FFMPEG_PATH=/usr/bin/ffmpeg .venv/bin/python -m pytest -q
+cd ../frontend
+PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH npm test
+PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH npm run build
+```
+
+실측 산출물은 `gpu-e2e-03`과 `gpu-recovery-01`에 있다. 일반 pytest는 실제 GPU 결과와 별개다.
+실행 후 annotated.pdf/preview.png 및 raw selection/validation JSON을 함께 확인한다.
+자동 runner의 `completed_requires_visual_review`는 인간 gold 검토 완료를 뜻하지 않는다.
+
 ## 기존 서비스
 
 Python 3.11+, uv, ffmpeg, Node >=22.13 필요. 기존 `.env`를 덮어쓰지 않는다.

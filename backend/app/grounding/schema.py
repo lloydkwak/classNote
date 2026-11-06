@@ -116,6 +116,7 @@ class TargetRequest(StrictModel):
     mentions_registry_hash: str = ""  # Reject stale/unversioned word-ID associations.
     image_mode: Literal["som", "original"] = "som"
     alignment_hash: str = ""  # Existing rich alignment fingerprint, when supplied by caller.
+    inference_revision: str = ""  # Production runtime/prompt fingerprint, separate from alignment.
     min_confidence: float = Field(default=0.75, ge=0, le=1)
 
     @model_validator(mode="after")

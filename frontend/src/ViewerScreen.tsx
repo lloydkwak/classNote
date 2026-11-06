@@ -314,6 +314,13 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
                   <details className="note-quote">
                     <summary>교수님 원문</summary>
                     <blockquote>{note.quote}</blockquote>
+                    {note.provenance && (
+                      <p className="muted">
+                        {note.provenance.grounding_status === 'accepted'
+                          ? `슬라이드 요소 연결 확인: ${note.provenance.target_element_id}`
+                          : `요소 위치 미확정 · ${note.provenance.fallback_reason ?? note.provenance.grounding_status}`}
+                      </p>
+                    )}
                   </details>
                 </div>
               </li>

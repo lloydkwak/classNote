@@ -113,3 +113,45 @@ Phase C 실행 결과는 이후 기록하며 `.env`/기존 data/모델/lockfile�
 
 Phase C core/실제 ID 선택 및 검토 경로 완료. production API/planner 연결, 실제 강의 gold와
 복잡한 문서/OCR 품질 검증은 남아 있다. 상세 설계·재실행·실패 기록은 `visual_grounding.md` 참고.
+
+## Phase D — production 통합 계획 (구현 전)
+
+시작 `9a4b00a` clean main, GitHub main도 동일 SHA 확인. SSD 여유 61GiB.
+현재 clone의 jobs/samples에서 실강의 PDF/audio를 찾지 못했다. 합성 녹음/전사/의미 추출과
+실제 8B worker를 기존 run_pipeline에 연결해 PDF까지 검증한다. 실강의 품질로 보고하지 않는다.
+
+1. 기본 off `VISUAL_GROUNDING`과 별도 interpreter IPC를 추가. 고정 entrypoint/JSONL,
+   stdout 격리, job 내부 이미지 경로 검증, timeout/cancel/process-group cleanup.
+2. notes 단계의 Rich ContentItem → Phase C grounding 요청. 페이지별 bounded 요청과 분할,
+   source/registry/model/prompt/validation fingerprints로 resume와 stale 재검증.
+3. versioned evidence graph/action/provenance를 저장하고, 기존 consolidate/layout에 accepted bbox만 전달.
+   비확정 target은 임의 확정하지 않는다. VLM 장애는 기존 notes/planner fallback으로 기록.
+4. source→knowledge→decision→action→render/PDF 연결. density/style 변경은 grounding 재사용.
+   PDF/alignment/transcript 변경을 API에서도 검사. 과거 job/default/live 경로 보존.
+5. 기존 렌더 mark(underline/circle/bracket/none)와 connector만 연결. rotation/crop을 display
+   좌표로 변환하고 export 실제 배치를 검증. Phase E layout 재설계는 하지 않는다.
+6. mock/IPC/실제 GPU 통합·PDF/PNG 검토·backend/frontend 회귀, 품질/실패/재현 문서 작성.
+
+e5는 현재 코드에서 명시적으로 CPU. GPU STT는 VLM과 같은 lease 및 단계 종료 시 해제를 적용한다.
+모델/환경/.env/기존 사용자 데이터는 수정·삭제하지 않는다. commit/push는 이번 요청 범위에 없다.
+
+### Phase D 구현 및 검증 결과
+
+- 기존 오프라인 `run_pipeline`에 기본 off flag와 isolated JSONL VLM worker를 연결했다.
+  Rich ContentItem/Phase C adapter·registry·validator·GPU lifecycle을 재사용했다.
+- versioned graph/action/provenance가 발화·지식·정렬·검증 target·render·PDF hash를 연결한다.
+  accepted만 canonical bbox를 사용한다. ambiguity/rejection은 unanchored note,
+  VLM 장애는 명시적 fallback이며 모든 상세 item을 보존한다.
+- density/font/resume는 VLM 재추론 없이 처리한다. source 변경 시 stale mapping 금지,
+  validation-only 변경 시 raw 응답 재검증, 부분 checkpoint 재사용도 테스트했다.
+- 기존 layout/export mark를 연결하고 crop/rotation 원본 복사 및 실제 ink 좌표를 검증했다.
+  v2 mentions의 registry stamp 및 display geometry도 지원한다.
+- 실제 GPU production 통합 `gpu-e2e-03`: 7 추론, accepted5/rejected1/ambiguous1,
+  actions7/render7, peak device7.23GiB, OOM0. PDF/PNG/JSON 직접 검토했다.
+  실제 timeout/cancel 정리 및 OOM1회 후 축소 재시도도 별도 `gpu-recovery-01`에서 통과했다.
+- backend432, frontend25, build 통과. 상세: `evidence_graph.md`, `annotation_quality_report.md`.
+
+Phase D의 선택적 production 연결·합성 end-to-end/GPU 검증은 완료했다. 실강의 데이터가 없어
+실강의 STT/추출/grounding 정확도와 인간 품질 평가까지 완료했다고 주장하지 않는다.
+Phase E: connector 교차·figure circle/caption 간섭, free-space/overflow를 우선 개선.
+Phase F: 동의된 실제 강의 입력·사람 gold 확보 후 동일 입력 A/B 및 coverage/정확도 측정.

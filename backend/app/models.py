@@ -145,6 +145,22 @@ class Span(BaseModel):
     transcript: str
 
 
+class AnnotationProvenance(BaseModel):
+    schema_version: int = 1
+    action_id: str
+    knowledge_id: str
+    evidence_id: str
+    source_segment_ids: list[int]
+    timestamp_range: tuple[float, float]
+    pdf_sha256: str
+    registry_fingerprint: str = ""
+    target_element_id: str | None = None
+    target_kind: str | None = None
+    grounding_status: str
+    fallback_reason: str | None = None
+    decision_id: str
+
+
 class Note(BaseModel):
     content_id: str | None = None
     page: int
@@ -156,6 +172,9 @@ class Note(BaseModel):
     importance: int
     start: float
     end: float
+    target_bboxes: list[BBox] | None = None  # Display-normalized registry geometry; never model coordinates.
+    target_mark: Literal["underline", "circle", "bracket", "none"] | None = None
+    provenance: AnnotationProvenance | None = None
 
 
 Point = tuple[float, float]
@@ -193,6 +212,7 @@ class Annotation(BaseModel):
     start: float
     end: float
     sketch: Sketch
+    provenance: AnnotationProvenance | None = None
 
 
 class PageAnnotations(BaseModel):
@@ -204,6 +224,7 @@ class PageAnnotations(BaseModel):
 
 
 class Annotations(BaseModel):
+    grounding: dict | None = None
     planning: list[dict] = []
     job_id: str
     pages: list[PageAnnotations]

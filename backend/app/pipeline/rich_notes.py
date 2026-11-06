@@ -57,6 +57,9 @@ class DetailedNotes(BaseModel):
     schema_version: int = 1
     alignment_hash: str = ""
     extraction_hash: str = ""
+    transcript_hash: str = ""
+    pdf_hash: str = ""
+    provenance: dict = {}
     items: list[ContentItem] = []
     validation: list[ValidationRecord] = []
     complete: bool = True

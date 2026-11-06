@@ -32,6 +32,9 @@ class Settings:
     demo_mode: bool
     data_dir: Path
     ffmpeg_path: str | None
+    visual_grounding: bool = False
+    vlm_python: Path = REPO_ROOT / ".venv-vlm/bin/python"
+    vlm_timeout: float = 180
 
 
 def get_settings() -> Settings:
@@ -53,4 +56,7 @@ def get_settings() -> Settings:
         demo_mode=os.environ.get("DEMO_MODE", "0") == "1",
         data_dir=Path(os.environ.get("DATA_DIR") or REPO_ROOT / "data"),
         ffmpeg_path=_optional("FFMPEG_PATH"),
+        visual_grounding=os.environ.get("VISUAL_GROUNDING", "0") == "1",
+        vlm_python=Path(os.environ.get("VLM_PYTHON") or REPO_ROOT / ".venv-vlm/bin/python"),
+        vlm_timeout=float(os.environ.get("VLM_TIMEOUT_SECONDS", "180")),
     )

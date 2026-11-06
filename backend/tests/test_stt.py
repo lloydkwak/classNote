@@ -19,6 +19,32 @@ class CountingProvider(stt.STTProvider):
         return [Segment(start=0, end=1, text="hello")]
 
 
+def test_opt_in_gpu_stt_releases_model_and_lease_on_failure(monkeypatch):
+    from contextlib import contextmanager
+    events=[]
+    @contextmanager
+    def lease():
+        events.append("acquire")
+        try:
+            yield
+        finally:
+            events.append("release")
+    class Loader:
+        def __call__(self,*args):
+            return SimpleNamespace(model=SimpleNamespace(unload_model=lambda:events.append("unload")))
+        def cache_clear(self):
+            events.append("clear")
+    monkeypatch.setattr("app.gpu.gpu_lease",lease)
+    monkeypatch.setattr(stt,"_load_whisper",Loader())
+    provider=stt.FasterWhisperProvider("small","cuda","float16")
+    provider.serialize_gpu=True
+    with pytest.raises(RuntimeError):
+        with provider._session():
+            events.append("infer")
+            raise RuntimeError("STT failure")
+    assert events==["acquire","infer","unload","clear","release"]
+
+
 @pytest.fixture
 def provider(monkeypatch):
     counting = CountingProvider()

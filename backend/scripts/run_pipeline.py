@@ -43,12 +43,19 @@ def main() -> int:
     parser.add_argument("--job-id", help="Job to resume, or the id for a new job")
     parser.add_argument("--from-step", choices=STEP_NAMES)
     parser.add_argument("--to-step", choices=STEP_NAMES)
+    parser.add_argument("--visual-grounding",action=argparse.BooleanOptionalAction,default=None)
     args = parser.parse_args()
 
     if args.pdf:
-        job_id = create_job(args.pdf, args.audio, args.job_id)
+        job_id = create_job(args.pdf, args.audio, args.job_id,visual_grounding=args.visual_grounding)
     elif args.job_id:
         job_id = args.job_id
+        if args.visual_grounding is not None:
+            import json
+            path=job_dir(job_id)/"job.json"
+            options=json.loads(path.read_text()) if path.exists() else {}
+            options["visual_grounding"]=args.visual_grounding
+            path.write_text(json.dumps(options),encoding="utf-8")
     else:
         parser.error("Pass --pdf for a new job, or --job-id to resume one.")
 

@@ -23,6 +23,36 @@ def registry_fingerprint(registry):
                                     ensure_ascii=False).encode()).hexdigest()
 
 
+def display_box(registry,box):
+    rect=pymupdf.Rect(box)*pymupdf.Matrix(registry.width,registry.height)*pymupdf.Matrix(registry.rotation_matrix)
+    width,height=(registry.height,registry.width) if registry.rotation in {90,270} else (registry.width,registry.height)
+    return (rect.x0/width,rect.y0/height,rect.x1/width,rect.y1/height)
+
+
+def extract_display_pdf(path, *, geometry=False):
+    """Existing extractor on an unrotated copy, converted to the viewer/export coordinate frame."""
+    with tempfile.TemporaryDirectory(prefix="classnote-display-") as tmp,pymupdf.open(path) as doc:
+        source=Path(tmp)/"unrotated.pdf"
+        rotations=[tuple(page.rotation_matrix) for page in doc]
+        sizes=[(page.rect.width,page.rect.height) for page in doc]
+        for page in doc:
+            page.set_rotation(0)
+        doc.save(source)
+        extraction=pdf_extract.extract_pdf(source)
+        if geometry:
+            pdf_extract.add_geometry(source,extraction)
+        for page,matrix,(width,height) in zip(extraction.pages,rotations,sizes):
+            transform=pymupdf.Matrix(page.width,page.height)*pymupdf.Matrix(matrix)
+            def convert(box):
+                rect=pymupdf.Rect(box)*transform
+                return (rect.x0/width,rect.y0/height,rect.x1/width,rect.y1/height)
+            for element in [*page.blocks,*page.words,*page.lines]:
+                element.bbox=convert(element.bbox)
+            page.free_rects=[convert(box) for box in page.free_rects]
+            page.width,page.height=width,height
+        return extraction
+
+
 def build_registries(path: Path, *, ocr=False) -> list[ElementRegistry]:
     """IDs match the existing extractor on an equivalent unrotated document.
 

@@ -1,5 +1,43 @@
 # Codex handoff — 2026-11-06
 
+## 최신 Ubuntu Phase D 상태 (아래 Windows 기록보다 우선)
+
+- `/root/classNote`, `main`, 시작 HEAD/GitHub main `9a4b00a`, 시작 시 clean.
+- Phase D 코드/문서는 구현 후 사용자의 후속 요청에 따라 커밋했다. push는 수행하지 않았다.
+- 기본 off `VISUAL_GROUNDING`, per-job POST/CLI 옵션으로 production `run_pipeline`에 연결했다.
+  기존 Rich Notes/Phase C target validation/Phase B GPU lifecycle/기존 layout/export 재사용.
+- 중심 파일: `app/evidence.py`, `app/pipeline/grounded_notes.py`, `app/grounding/ipc.py`,
+  `scripts/vlm_worker.py`, `scripts/verify_phase_d.py`, `scripts/verify_vlm_recovery.py`.
+  run/models/consolidate/export/API 및 Viewer 원문 상세에 호환 가능한 optional 필드를 연결했다.
+- 상세 설계·실행: [evidence_graph.md](evidence_graph.md), [ubuntu_vlm.md](ubuntu_vlm.md).
+- 최종 검증: backend432 passed (44.40s), frontend25 passed(Node22.23.4), production build passed.
+  기존 bundle-size warning만 남는다. 일반 tests는 mock; GPU 실행 결과와 구분한다.
+- 실제 통합 `data/phase-d-runs/gpu-e2e-03`: 실제8B7회, accepted5/rejected1/ambiguous1,
+  상세7/actions7/render7, 원문 불일치 추출1 거절. model load9.832s, 평균 generate2.192s,
+  device peak7.23GiB, OOM0. density와 notes resume는 worker 없이 통과했다.
+- 실제 복구 `data/phase-d-runs/gpu-recovery-01`: warm timeout/cancel 및 명시적 OOM 후 축소 재시도 통과.
+  새 worker 재시작 가능, device memory 최종10MiB. 모델은 그대로8B, 재다운로드 없음.
+- **합성 검증**: 실강의 원본이 없어 PDF/무음 WAV·고정 STT/정렬/semantic fixture를 사용했다.
+  실제 GPU는 grounding만 사용. 실강의 성능, semantic coverage/human accuracy, 실강의 A/B 미검증.
+- PDF/preview/JSON 직접 검토: 단어·α·∇·수식·그림 위치 연결 확인. connector 교차와
+  figure circle의 캡션 간섭은 남아 있다. 수치화한 가독성 개선 주장 없음.
+- crop/rotation4종/native word/ink vertex 테스트와 원본 bytes 보존 확인. v2는 registry stamped
+  mentions를 사용한다. 오래된 unstamped mentions는 확정 연결 근거로 승격하지 않는다.
+- `.env`의 기존 Windows FFMPEG_PATH는 보존했다. 실행 시 `FFMPEG_PATH=/usr/bin/ffmpeg`를 지정한다.
+  backend `backend/.venv`, VLM `.venv-vlm`을 합치지 말 것. SSD `models/huggingface` 사용.
+  드라이버550.163.01/3080 10GB, 시스템 CUDA12.4, VLM torch2.6+cu124/transformers4.57.6/bnb0.49.0.
+- `.env`, 사용자 data, 모델, 가상환경, lockfile 보존. 신규 산출물은 ignored data에만 저장.
+- GPU STT shared lease/unload는 mock 검증만 수행했고 실제 STT는 CPU 기본값이다.
+  live visual grounding/UI upload toggle은 미구현이며 live 기존 경로를 유지한다.
+
+다음 우선순위: (1) Phase E의 leader 교차·figure/caption·overflow,
+(2) 동의된 실강의와 사람 gold 확보 및 실제 추출 손실 진단,
+(3) 동일 입력 A/B·실제 GPU STT 공존/브라우저 음성 수동 검토.
+
+---
+
+## 이전 인수 기록 (Windows/Phase A–C 역사)
+
 ## 인수 상태
 
 - CWD: `C:/Users/user/Desktop/classNote`, branch `main`, HEAD `5d04fc1`.
