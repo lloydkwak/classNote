@@ -390,6 +390,7 @@ export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
         <div className="error" role="alert">
           <p>{error}</p>
           {jobId && <button onClick={reset}>다시 시도</button>}
+          {jobId && <a className="button" href={`#/jobs/${jobId}`}>지금까지의 결과 보기</a>}
         </div>
       )}
     </main>

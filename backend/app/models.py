@@ -109,6 +109,30 @@ class Mention(BaseModel):
     score: float  # 0-100.
 
 
+class AudioRange(BaseModel):
+    """One visit to a page, in the original recording's clock."""
+
+    start: float
+    end: float
+    confidence: float  # Of the alignment, 0-1, weighted by window length.
+    source_window_ids: list[str]  # e.g. ["w4", "w5"], the alignment windows behind this range.
+    reason: Literal["first_visit", "revisit"]
+
+
+class PageAudioEntry(BaseModel):
+    page: int
+    audio_ranges: list[AudioRange]  # In time order. Empty if nothing was matched to this page.
+    primary_start: float | None
+    total_duration: float
+
+
+class PageAudio(BaseModel):
+    schema_version: int = 2
+    pages: list[PageAudioEntry]
+    duration: float  # Of the recording, or of the transcript when that isn't known.
+    unmatched_seconds: float = 0.0  # Off-topic speech, which belongs to no page.
+
+
 NoteType = Literal["explanation", "example", "emphasis", "exam_hint", "question"]
 
 

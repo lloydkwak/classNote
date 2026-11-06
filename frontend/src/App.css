@@ -639,14 +639,120 @@ button:disabled {
   border-top: 1px solid var(--border);
 }
 
-.player audio {
-  display: block;
-  width: 100%;
-  height: 36px;
-}
-
 .player p {
   margin: 0;
+}
+
+.player-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.player-row button.primary {
+  font-weight: 600;
+}
+
+.player-toggle {
+  min-width: 36px;
+}
+
+.player-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.player-duration {
+  font-weight: 400;
+}
+
+.player-status {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.player-status button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Tall enough to hit with a finger, with a thin bar drawn inside. */
+.timeline {
+  position: relative;
+  height: 20px;
+  margin-top: 6px;
+  cursor: pointer;
+  background: linear-gradient(var(--border), var(--border)) center / 100% 6px no-repeat;
+  border-radius: 3px;
+}
+
+.timeline:focus-visible {
+  outline: 2px solid var(--accent, #2a78d6);
+  outline-offset: 1px;
+}
+
+.timeline-range {
+  position: absolute;
+  top: 7px;
+  height: 6px;
+  min-width: 1px;
+  background: color-mix(in srgb, currentColor 22%, transparent);
+  pointer-events: none;
+}
+
+.timeline-range.current {
+  top: 4px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--accent, #2a78d6);
+}
+
+.timeline-head {
+  position: absolute;
+  top: 1px;
+  width: 2px;
+  height: 18px;
+  margin-left: -1px;
+  background: currentColor;
+  pointer-events: none;
+}
+
+.player-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-height: 26px;
+  align-items: center;
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.range-chip {
+  padding: 1px 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  border-radius: 999px;
+}
+
+.range-chip.current {
+  background: var(--accent, #2a78d6);
+  border-color: var(--accent, #2a78d6);
+  color: #fff;
+}
+
+.range-chip.unsure {
+  border-style: dashed;
 }
 
 /* Presentation mode */

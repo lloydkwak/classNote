@@ -2,24 +2,37 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   annotatedPdfUrl,
   audioUrl,
-  getAlignment,
   getAnnotations,
+  getPageAudio,
   pdfUrl,
-  type AlignedWindow,
   type Annotation,
   type Annotations,
+  type PageAudio,
 } from './api'
 import { formatTime } from './format'
+import { LecturePlayerBar } from './LecturePlayerBar'
 import { isPlaying, SlideSheet, TYPE_LABELS } from './SlideSheet'
+import { useLecturePlayer } from './useLecturePlayer'
 
 /** The page being explained at this time. Off-topic moments stay on the page before them. */
-function pageAtTime(windows: AlignedWindow[], time: number) {
-  let page: number | null = null
-  for (const window of windows) {
-    if (window.start > time) break
-    if (window.page !== null) page = window.page
+function pageAtTime(pageAudio: PageAudio, time: number) {
+  let latest: { page: number; start: number } | null = null
+  for (const entry of pageAudio.pages) {
+    for (const range of entry.audio_ranges) {
+      if (range.start <= time && (!latest || range.start > latest.start)) {
+        latest = { page: entry.page, start: range.start }
+      }
+    }
   }
-  return page
+  return latest?.page ?? null
+}
+
+function pageAtFirstSpeech(pageAudio: PageAudio) {
+  const heard = pageAudio.pages.filter((entry) => entry.primary_start !== null)
+  if (heard.length === 0) return null
+  return heard.reduce((first, entry) =>
+    (entry.primary_start as number) < (first.primary_start as number) ? entry : first,
+  ).page
 }
 
 export function ViewerScreen({ jobId }: { jobId: string }) {
@@ -28,27 +41,28 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
   const [pageCount, setPageCount] = useState(0)
   const [page, setPage] = useState(1)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [time, setTime] = useState(0)
   const [hasAudio, setHasAudio] = useState(true)
   const [follow, setFollow] = useState(true)
   const [showNotes, setShowNotes] = useState(true)
-  const [windows, setWindows] = useState<AlignedWindow[]>([])
+  const [pageAudio, setPageAudio] = useState<PageAudio | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
+  const player = useLecturePlayer(jobId, audioRef)
+  const { time, playback, toggle: togglePlayback } = player
   const activeCardRef = useRef<HTMLButtonElement>(null)
   const currentDotRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
-    getAnnotations(jobId)
-      .then((loaded) => {
-        setAnnotations(loaded)
-        // Open where the notes are, not on a title slide that may have none.
-        if (loaded.pages.length > 0) setPage(loaded.pages[0].page)
-      })
-      .catch((cause) => setError(cause.message))
-    // Following needs this, but the slides and notes work without it.
-    getAlignment(jobId)
-      .then((alignment) => setWindows(alignment.windows))
-      .catch(() => setWindows([]))
+    // Slides and audio work without notes, and notes work without page audio.
+    void Promise.allSettled([getAnnotations(jobId), getPageAudio(jobId)]).then(([notes, audio]) => {
+      if (notes.status === 'fulfilled') setAnnotations(notes.value)
+      if (audio.status === 'fulfilled') setPageAudio(audio.value)
+      // Open where the lecture starts, not on a title slide that may never be discussed.
+      const heard = audio.status === 'fulfilled' ? audio.value : null
+      const first = heard ? pageAtFirstSpeech(heard) : null
+      const noted = notes.status === 'fulfilled' ? notes.value.pages[0]?.page : undefined
+      const opening = first ?? noted
+      if (opening) setPage(opening)
+    })
   }, [jobId])
 
   const pageAnnotations = useMemo(
@@ -78,24 +92,31 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
     setPage(Math.min(Math.max(next, 1), pageCount || 1))
   }
 
-  const onTimeUpdate = (audio: HTMLAudioElement) => {
-    setTime(audio.currentTime)
-    if (!follow || audio.paused) return
-    const target = pageAtTime(windows, audio.currentTime)
+  // While listening to one page, the listener is free to look at others.
+  useEffect(() => {
+    if (!follow || !pageAudio || playback.mode !== 'lecture' || playback.status !== 'playing') return
+    const target = pageAtTime(pageAudio, time)
     if (target !== null) setPage(target)
-  }
+  }, [follow, pageAudio, playback.mode, playback.status, time])
+
+  const pageEntry = pageAudio?.pages.find((entry) => entry.page === page)
 
   const playNote = (note: Annotation) => {
     setSelectedId(note.id)
-    const audio = audioRef.current
-    if (!audio) return
-    audio.currentTime = note.start
-    void audio.play()
+    player.playLecture(note.start)
+  }
+
+  const playThisPage = () => {
+    if (pageEntry) player.playPage(page, pageEntry.audio_ranges)
   }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement) return
+      if (event.key === ' ' && !(event.target instanceof HTMLButtonElement)) {
+        event.preventDefault()
+        togglePlayback()
+      }
       if (event.key === 'ArrowRight') {
         setFollow(false)
         setPage((value) => Math.min(value + 1, pageCount || 1))
@@ -107,7 +128,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [pageCount])
+  }, [pageCount, togglePlayback])
 
   return (
     <div className={`viewer${showNotes ? '' : ' notes-hidden'}`}>
@@ -203,8 +224,11 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
               {error}
             </p>
           )}
-          {!error && annotations && notes.length === 0 && (
-            <p className="muted">이 페이지에는 노트가 없습니다.</p>
+          {!error && notes.length === 0 && (
+            <p className="muted">
+              이 페이지에는 노트가 없습니다.
+              {pageEntry?.audio_ranges.length ? ' 아래에서 이 페이지 강의를 들을 수 있습니다.' : ''}
+            </p>
           )}
           <ul>
             {notes.map((note) => (
@@ -240,20 +264,30 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
         </aside>
       )}
 
-      <footer className="player">
-        {hasAudio ? (
-          <audio
-            ref={audioRef}
-            controls
-            preload="metadata"
-            src={audioUrl(jobId)}
-            onTimeUpdate={(event) => onTimeUpdate(event.currentTarget)}
-            onError={() => setHasAudio(false)}
-          />
-        ) : (
+      <audio ref={audioRef} preload="metadata" src={audioUrl(jobId)} onError={() => setHasAudio(false)} />
+      {hasAudio ? (
+        <LecturePlayerBar
+          page={page}
+          entry={pageEntry}
+          pageAudio={pageAudio}
+          playback={playback}
+          time={time}
+          duration={player.duration}
+          rate={player.rate}
+          savedTime={player.savedTime}
+          onPlayPage={playThisPage}
+          onPlayLecture={player.playLecture}
+          onToggle={player.toggle}
+          onSeek={player.seek}
+          onJumpToRange={player.jumpToRange}
+          onCycleRate={player.cycleRate}
+          onGoToPage={goToPage}
+        />
+      ) : (
+        <footer className="player">
           <p className="muted">이 작업에는 오디오가 없습니다.</p>
-        )}
-      </footer>
+        </footer>
+      )}
     </div>
   )
 }

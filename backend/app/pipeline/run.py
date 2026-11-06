@@ -11,13 +11,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 from app.config import get_settings
-from app.models import Alignment, Annotations, Note, PdfExtraction, Segment, Window
+from app.models import Alignment, Annotations, Note, PageAudio, PdfExtraction, Segment, Window
 from app.pipeline.audio import convert_to_mp3
 from app.pipeline.block_align import generate_notes
 from app.pipeline.consolidate import consolidate
 from app.pipeline.figure_caption import caption_figures
 from app.pipeline.export_pdf import EXPORT_NAME, export_annotated_pdf
 from app.pipeline.page_align import align_windows
+from app.pipeline.page_audio import build_page_audio
 from app.pipeline.mentions import find_mentions
 from app.pipeline.pdf_extract import add_geometry, extract_pdf
 from app.pipeline.stt import transcribe
@@ -31,6 +32,7 @@ EXTRACTION_NAME = "extraction.json"
 SEGMENTS_NAME = "segments.json"
 WINDOWS_NAME = "windows.json"
 ALIGNMENT_NAME = "alignment.json"
+PAGE_AUDIO_NAME = "page_audio.json"
 MENTIONS_NAME = "mentions.json"
 NOTES_NAME = "notes.json"
 NOTES_COMPLETE_NAME = "notes_complete.json"
@@ -127,6 +129,11 @@ def _read_alignment(folder: Path) -> Alignment:
     return Alignment.model_validate_json((folder / ALIGNMENT_NAME).read_text(encoding="utf-8"))
 
 
+def _step_page_audio(folder: Path) -> None:
+    page_audio = build_page_audio(_read_alignment(folder))
+    _write_atomically(folder / PAGE_AUDIO_NAME, page_audio.model_dump_json(indent=2))
+
+
 def _step_evidence(folder: Path) -> None:
     """For ANNOTATION_ENGINE=v2: the slide's words and free space, and what was said about them."""
     if get_settings().annotation_engine != "v2":
@@ -173,6 +180,7 @@ STEPS: list[tuple[str, str, Callable[[Path], None]]] = [
     ("transcribe", "transcribing", _step_transcribe),
     ("window", "aligning", _step_window),
     ("align", "aligning", _step_align),
+    ("page_audio", "aligning", _step_page_audio),
     ("evidence", "aligning", _step_evidence),
     ("notes", "writing_notes", _step_notes),
     ("consolidate", "writing_notes", _step_consolidate),
@@ -203,6 +211,15 @@ def read_annotations(job_id: str) -> Annotations:
 
 def export_job(job_id: str) -> None:
     _step_export(job_dir(job_id))
+
+
+def read_page_audio(job_id: str) -> PageAudio:
+    """Older jobs and talks still being recorded have no file, so derive it from the alignment."""
+    folder = job_dir(job_id)
+    path = folder / PAGE_AUDIO_NAME
+    if path.exists():
+        return PageAudio.model_validate_json(path.read_text(encoding="utf-8"))
+    return build_page_audio(_read_alignment(folder))
 
 
 def read_alignment(job_id: str) -> Alignment:

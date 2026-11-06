@@ -11,7 +11,7 @@ from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.config import get_settings
-from app.models import JobStatus
+from app.models import JobStatus, PageAudio
 from app.pipeline import run as pipeline
 from app.pipeline.export_pdf import EXPORT_NAME
 from app.pipeline.live import LiveSession
@@ -176,6 +176,15 @@ def get_annotations(job_id: str) -> FileResponse:
     return _serve(
         job_id, pipeline.ANNOTATIONS_NAME, "application/json", "노트가 아직 준비되지 않았습니다."
     )
+
+
+@router.get("/{job_id}/page-audio")
+def get_page_audio(job_id: str) -> PageAudio:
+    """Each page's ranges of the recording. Works with or without notes."""
+    folder = _folder(job_id)
+    if not (folder / pipeline.ALIGNMENT_NAME).exists():
+        raise HTTPException(404, "정렬 결과가 아직 준비되지 않았습니다.")
+    return pipeline.read_page_audio(job_id)
 
 
 @router.get("/{job_id}/pdf")
