@@ -21,7 +21,7 @@ from app.pipeline.rich_notes import plan_annotations
 from app.vlm.schema import MODEL_ID, MODEL_REVISION
 
 GROUNDING_NAME="grounding_results.json"
-ACTION_POLICY="grounded-actions-v1"
+ACTION_POLICY="grounded-actions-v2-layout-overflow"
 PROVIDER_FACTORY=IsolatedVLMProvider
 
 
@@ -214,8 +214,8 @@ def prepare_grounding(folder,content,alignment,segments):
     return manifest
 
 
-def plan_grounded(folder,content,extraction,density):
-    notes=plan_annotations(content,extraction,density)
+def plan_grounded(folder,content,extraction,density,allow_overflow=False):
+    notes=plan_annotations(content,extraction,density,allow_overflow=allow_overflow)
     selected={note.content_id:note for note in notes}
     manifest=load_grounding(folder,content)
     registries={int(page):ElementRegistry.model_validate(r) for page,r in manifest["registries"].items()}
@@ -253,7 +253,7 @@ def plan_grounded(folder,content,extraction,density):
                                 target_element_id=provenance.target_element_id,target_kind=provenance.target_kind,
                                 grounding_status=decision["status"],annotation_type=mark,annotation_text=item.short_note,
                                 priority=item.importance,density=density,registry_fingerprint=provenance.registry_fingerprint,
-                                selected=item.id in selected,reason="planned" if item.id in selected else "density_space_budget",
+                                selected=item.id in selected,reason="planned" if item.id in selected else "density_threshold" if allow_overflow else "density_space_budget",
                                 provenance=provenance)
         actions.append(action)
         if item.id in selected:
@@ -275,6 +275,8 @@ def save_graph(folder,content,segments,alignment,actions,manifest,annotations,de
                           [a.action_id for a in actions],
                           [n.sketch.model_dump(mode="json") for p in annotations.pages for n in p.notes],
                           hash_file(root/"layout.py"),hash_file(root/"export_pdf.py")])
+    revision=fingerprint([revision,annotations.layout_engine,annotations.ink_style,
+                          hash_file(root/"layout_v2.py") if annotations.layout_engine=="v2" else None])
     saved_path=folder/f"evidence_graph-{density}.json"
     if export is None and saved_path.exists():
         old=json.loads(saved_path.read_text())

@@ -4,6 +4,74 @@
 `data/vlm-runs/ssd-smoke/report.json`으로 실제 추론 성공 확인. 아래 RAM tmpfs 설명은
 초기 A/B 실험 기록이다. 현재 실행은 SSD 경로가 기본이며 모델을 다시 다운로드할 필요가 없다.
 
+## Phase E: 서비스 실행과 재현
+
+기존 가상환경/PyAV18.1.0을 그대로 사용한다. 이번 작업에서 `uv sync`/모델 재다운로드는 하지 않았다.
+`av==18.1.0`이 pyproject/lock에 고정되어 있다. backend와 VLM 환경을 합치지 않는다.
+
+```bash
+cd /root/classNote
+# 실제 분석: 기존 .env의 provider/key를 사용한다. 업로드 후에는 실제 STT/LLM 작업이 실행된다.
+FFMPEG_PATH=/usr/bin/ffmpeg LAYOUT_ENGINE=v2 \
+  backend/.venv/bin/python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+# 별도 SSH terminal
+cd /root/classNote/frontend
+PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+클라이언트에서 `ssh -L 5173:127.0.0.1:5173 USER@SERVER` 후 `http://localhost:5173`.
+Vite는 backend8000으로 proxy한다. 기존 서비스가 해당 포트를 사용하면 임의 종료하지 말고 다른
+port와 `API_TARGET`을 지정한다. layout backend 기본은v1이며 UI는v2를 명시적으로 요청한다.
+UI의 기존 배치/새 배치, Clean/Natural/Highlighter를 바꾸거나 아래처럼 직접 조회할 수 있다.
+
+```bash
+curl -o /tmp/classnote-v2.pdf \
+  'http://127.0.0.1:8000/api/jobs/JOB_ID/annotated.pdf?density=balanced&layout=v2&ink_style=natural'
+```
+
+동일 저장 job의 layout 비교는 새 output 폴더로 실행한다. 원본은 읽기만 하고 복사본을 수정한다.
+추가 모델/LLM inference를 막아둔 CPU-only runner다.
+
+```bash
+cd /root/classNote
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/verify_phase_e.py \
+  --job data/jobs/6c094c2fe7cc --output data/phase-e-runs/YOUR_REAL_RUN
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/verify_phase_e.py \
+  --job data/phase-d-runs/gpu-e2e-03/state/jobs/phase-d-synthetic \
+  --output data/phase-e-runs/YOUR_SYNTHETIC_RUN --exercise-overflow
+# backend 회귀
+cd backend
+FFMPEG_PATH=/usr/bin/ffmpeg .venv/bin/python -m pytest -q
+cd ../frontend
+PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH npm test
+PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH npm run build
+```
+
+### 브라우저 검증 전용 서버 (실제 분석 서비스와 구분)
+
+검증에는8011/5177, mock providers, `data/phase-e-runs/real-02/state` 복사본을 사용했다.
+이 URL에서 생성한 새 job은 실제 강의 분석 품질 검증이 아니다. 실제 분석은 위8000/5173 명령.
+
+```bash
+cd /root/classNote
+DATA_DIR=/root/classNote/data/phase-e-runs/real-02/state STT_PROVIDER=mock LLM_PROVIDER=mock \
+  EMBEDDING_PROVIDER=mock VISUAL_GROUNDING=0 FFMPEG_PATH=/usr/bin/ffmpeg \
+  backend/.venv/bin/python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8011
+# 별도 terminal
+cd /root/classNote/frontend
+API_TARGET=http://127.0.0.1:8011 PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH \
+  npm run dev -- --host 127.0.0.1 --port 5177
+# 브라우저 regression (repo root, 개발용 Playwright는 .cache/browser에 설치되어 있음)
+cd /root/classNote
+PHASE_E_ARTIFACTS=data/phase-e-runs/YOUR_BROWSER_RUN \
+  PLAYWRIGHT_BROWSERS_PATH=/root/classNote/.cache/ms-playwright \
+  .cache/node/node_modules/node/bin/node frontend/scripts/browser-check.mjs
+```
+
+접속은 SSH forward5177 후 `http://localhost:5177`. TEST_JOB/FRONTEND_URL 환경 변수로 다른 복사본과
+서버를 사용할 수 있다. 스크립트는 실제 업로드/API/audio와 명시적 mock status/error를 구분한다.
+현재 결과는 `final-real`, `final-synthetic`, `frontend-final`, `rotation-review` 산출물 참고.
+
 ## Phase D: production opt-in 실행
 
 모델 다운로드/환경 재설치는 필요 없다. 기존 `.env`와 provider 설정을 유지하고 Linux ffmpeg만

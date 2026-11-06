@@ -1,398 +1,50 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
-import {
-  createJob,
-  createLiveJob,
-  finishLiveJob,
-  getStatus,
-  sendChunk,
-  type JobState,
-  type JobStatus,
-} from './api'
-import { enterFullscreen, PresentScreen } from './PresentScreen'
-import { useRecorder } from './useRecorder'
+import { useRef, useState, type DragEvent } from 'react'
+import { createJob, type Density } from './api'
+import { LiveUploadScreen } from './LiveUploadScreen'
+import { Brand, DensityControl, Icon, readPreference, savePreference } from './ui'
+import { fileSize, validateFile } from './fileRules'
 
-const STEPS: { state: JobState; label: string }[] = [
-  { state: 'extracting_pdf', label: '슬라이드 읽는 중' },
-  { state: 'transcribing', label: '녹음 받아쓰는 중' },
-  { state: 'aligning', label: '음성과 슬라이드 맞추는 중' },
-  { state: 'writing_notes', label: '노트 작성 중' },
-]
-const POLL_MS = 1500
-const LIVE_POLL_MS = 400
-// Shorter parts when presenting, so the audience sees notes sooner.
-const PRESENT_CHUNK_MS = Number(import.meta.env.VITE_PRESENT_CHUNK_SECONDS ?? 20) * 1000
-const CHUNK_MS = Number(import.meta.env.VITE_LIVE_CHUNK_SECONDS ?? 60) * 1000
-
-// The empty value uses the server's default for the mode.
-const SPEECH_MODELS = [
-  { value: '', label: '기본값' },
-  { value: 'small', label: 'small (빠름)' },
-  { value: 'large-v3-turbo', label: 'large-v3-turbo (더 정확, 느림)' },
-]
-
-function formatTimer(seconds: number) {
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-}
-
-function isPdf(file: File) {
-  return file.name.toLowerCase().endsWith('.pdf')
-}
-
-function messageOf(cause: unknown) {
-  return cause instanceof Error ? cause.message : String(cause)
-}
-
-function DropZone(props: {
-  title: string
-  hint: string
-  accept: string
-  file: File | null
-  onFiles: (files: File[]) => void
-}) {
-  const [dragging, setDragging] = useState(false)
-
-  const onDrop = (event: DragEvent) => {
-    event.preventDefault()
-    setDragging(false)
-    props.onFiles([...event.dataTransfer.files])
+function FileCard({ kind, file, onFile, onError }: { kind:'pdf'|'audio'; file:File|null; onFile:(f:File|null)=>void; onError:(e:string|null)=>void }) {
+  const input=useRef<HTMLInputElement>(null)
+  const [dragging,setDragging]=useState(false)
+  const choose=(files:File[])=>{
+    const selected=files[0];if(!selected)return
+    const error=validateFile(selected.name,selected.size,kind);onError(error);if(!error)onFile(selected)
   }
-
-  return (
-    <label
-      className={`dropzone${dragging ? ' dragging' : ''}${props.file ? ' filled' : ''}`}
-      onDragOver={(event) => {
-        event.preventDefault()
-        setDragging(true)
-      }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={onDrop}
-    >
-      <input
-        type="file"
-        accept={props.accept}
-        onChange={(event) => props.onFiles([...(event.target.files ?? [])])}
-      />
-      <strong>{props.title}</strong>
-      <span>{props.file ? props.file.name : props.hint}</span>
+  const drop=(e:DragEvent)=>{e.preventDefault();setDragging(false);choose([...e.dataTransfer.files])}
+  return <div className={`file-card ${dragging?'dragging':''} ${file?'filled':''}`} onDragOver={e=>{e.preventDefault();setDragging(true)}} onDragLeave={()=>setDragging(false)} onDrop={drop}>
+    <span className="file-icon"><Icon name={kind==='pdf'?'note':'audio'} size={28}/></span>
+    <label className="file-picker"><input ref={input} type="file" aria-label={kind==='pdf'?'PDF 슬라이드 선택':'강의 녹음 선택'} accept={kind==='pdf'?'.pdf':'.m4a,.mp3,.wav,.ogg,.flac,.aac,.mp4,.webm,.opus'} onChange={e=>{choose([...(e.target.files??[])]);e.target.value=''}}/>
+      <strong>{file?file.name:kind==='pdf'?'PDF 슬라이드':'강의 녹음'}</strong>
+      <span>{file?`${fileSize(file.size)} · ${kind==='pdf'?'PDF':file.name.split('.').pop()?.toUpperCase()}`:'끌어다 놓거나 클릭해서 선택'}</span>
+      <small>{file?'클릭하여 교체':kind==='pdf'?'PDF · 최대 100MB':'M4A, MP3, WAV 등 · 최대 1GB'}</small>
     </label>
-  )
+    {file?<button className="icon-button remove-file" aria-label={kind==='pdf'?'PDF 삭제':'녹음 삭제'} onClick={()=>onFile(null)}><Icon name="close" size={17}/></button>:<span className="file-add" aria-hidden="true">+</span>}
+  </div>
 }
-
-function liveStatusText(status: JobStatus | null, stopped: boolean, chunksSent: number) {
-  if (!status || status.status === 'preparing') return '슬라이드 준비 중…'
-  if (stopped) {
-    return `마무리하는 중… 지금까지 노트 ${status.note_count}개`
+export function UploadScreen({onDone}:{onDone:(id:string)=>void}) {
+  const [pdf,setPdf]=useState<File|null>(null),[audio,setAudio]=useState<File|null>(null)
+  const [density,setDensity]=useState<Density>(readPreference('classnote-density','balanced') as Density)
+  const [grounding,setGrounding]=useState(false),[live,setLive]=useState(false)
+  const [error,setError]=useState<string|null>(null),[progress,setProgress]=useState<number|null>(null),[uploading,setUploading]=useState(false)
+  const recent=readPreference('classnote-job','')
+  const start=async()=>{
+    if(!pdf||!audio||uploading)return;setError(null);setUploading(true);setProgress(null)
+    try {const id=await createJob(pdf,audio,'',{visualGrounding:grounding,onProgress:setProgress});savePreference('classnote-density',density);savePreference('classnote-job',id);onDone(id)}
+    catch {setError('파일을 업로드하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.')} finally {setUploading(false)}
   }
-  if (status.status === 'ready') return '녹음할 준비가 됐습니다.'
-  if (chunksSent === 0) return '녹음 중…'
-  return `${chunksSent}개 구간 중 ${status.chunks_processed}개 처리 완료 · 노트 ${status.note_count}개`
-}
-
-export function UploadScreen({ onDone }: { onDone: (jobId: string) => void }) {
-  const [pdf, setPdf] = useState<File | null>(null)
-  const [audio, setAudio] = useState<File | null>(null)
-  const [speechModel, setSpeechModel] = useState('')
-  const [jobId, setJobId] = useState<string | null>(null)
-  const [state, setState] = useState<JobState | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const [liveId, setLiveId] = useState<string | null>(null)
-  const [liveStatus, setLiveStatus] = useState<JobStatus | null>(null)
-  const [chunksSent, setChunksSent] = useState(0)
-  const [stopped, setStopped] = useState(false)
-  const [presenting, setPresenting] = useState(false)
-  // Read by the polling effect, which shouldn't restart when this changes.
-  const presentingRef = useRef(presenting)
-  useEffect(() => {
-    presentingRef.current = presenting
-  }, [presenting])
-  // Parts go up one at a time, in order, however slow the network is.
-  const uploadQueue = useRef<Promise<unknown>>(Promise.resolve())
-  const nextChunk = useRef(0)
-
-  const queueUpload = useCallback((send: () => Promise<unknown>) => {
-    uploadQueue.current = uploadQueue.current.then(send).catch((cause) => {
-      setError(messageOf(cause))
-    })
-  }, [])
-
-  const recorder = useRecorder({
-    chunkMs: presenting ? PRESENT_CHUNK_MS : CHUNK_MS,
-    onChunk: (blob) => {
-      const id = liveId
-      if (!id) return
-      const index = nextChunk.current++
-      queueUpload(async () => {
-        await sendChunk(id, index, blob)
-        setChunksSent(index + 1)
-      })
-    },
-    onStop: () => {
-      const id = liveId
-      if (id) queueUpload(() => finishLiveJob(id))
-    },
-  })
-  const recording = recorder.state !== 'idle'
-
-  // Start preparing as soon as the slides are chosen, so recording can begin at once.
-  useEffect(() => {
-    if (!pdf) return
-    let cancelled = false
-    setLiveId(null)
-    setLiveStatus(null)
-    createLiveJob(pdf, speechModel)
-      .then((id) => {
-        if (!cancelled) setLiveId(id)
-      })
-      .catch((cause) => {
-        if (!cancelled) setError(messageOf(cause))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [pdf, speechModel])
-
-  useEffect(() => {
-    if (!liveId) return
-    let cancelled = false
-    let timer: number | undefined
-
-    const poll = async () => {
-      try {
-        const status = await getStatus(liveId)
-        if (cancelled) return
-        setLiveStatus(status)
-        if (status.status === 'done') {
-          // When presenting, stay on the slides until the presenter chooses to leave.
-          if (!presentingRef.current) onDone(liveId)
-          return
-        }
-        if (status.status === 'error') {
-          setError(status.error ?? '처리에 실패했습니다.')
-          return
-        }
-      } catch {
-        // A brief network failure shouldn't end the talk, so keep polling.
-      }
-      timer = window.setTimeout(poll, LIVE_POLL_MS)
-    }
-
-    poll()
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [liveId, onDone])
-
-  // Dropping both files on either zone works: each file goes where it belongs.
-  const addFiles = (files: File[]) => {
-    for (const file of files) {
-      if (isPdf(file)) setPdf(file)
-      else setAudio(file)
-    }
-  }
-
-  const start = async () => {
-    if (!pdf || !audio) return
-    setUploading(true)
-    setError(null)
-    try {
-      setJobId(await createJob(pdf, audio, speechModel))
-    } catch (cause) {
-      setError(messageOf(cause))
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  const startRecording = () => {
-    setError(null)
-    setStopped(false)
-    setChunksSent(0)
-    nextChunk.current = 0
-    if (presenting) enterFullscreen() // Only allowed directly from a click.
-    void recorder.start()
-  }
-
-  const stopRecording = () => {
-    setStopped(true)
-    recorder.stop()
-  }
-
-  useEffect(() => {
-    if (!jobId) return
-    let cancelled = false
-    let timer: number | undefined
-
-    const poll = async () => {
-      try {
-        const status = await getStatus(jobId)
-        if (cancelled) return
-        setState(status.status)
-        if (status.status === 'done') return onDone(jobId)
-        if (status.status === 'error') {
-          setError(status.error ?? '처리에 실패했습니다.')
-          return
-        }
-      } catch {
-        // A brief network failure shouldn't end the job, so keep polling.
-      }
-      timer = window.setTimeout(poll, POLL_MS)
-    }
-
-    poll()
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [jobId, onDone])
-
-  const reset = () => {
-    setJobId(null)
-    setState(null)
-    setError(null)
-  }
-
-  const running = jobId !== null && state !== 'error'
-  const activeIndex = STEPS.findIndex((step) => step.state === state)
-  const showingLive = recording || stopped
-
-  if (presenting && showingLive && liveId) {
-    return (
-      <PresentScreen
-        jobId={liveId}
-        seconds={recorder.seconds}
-        recording={recording}
-        finished={liveStatus?.status === 'done'}
-        statusText={
-          liveStatus?.status === 'done'
-            ? `완료 · 노트 ${liveStatus.note_count}개`
-            : liveStatusText(liveStatus, stopped, chunksSent)
-        }
-        error={error ?? recorder.error}
-        onStop={stopRecording}
-        onOpenResult={() => onDone(liveId)}
-      />
-    )
-  }
-
-  return (
-    <main className="upload">
-      <h1>LectureNote</h1>
-      <p className="lede">
-        강의 녹음과 슬라이드를 올리면, 교수님이 한 말을 슬라이드의 해당 위치에 손글씨 노트로
-        적어 드립니다.
-      </p>
-
-      {!jobId && (
-        <>
-          <div className="dropzones">
-            <DropZone
-              title="슬라이드"
-              hint="PDF를 끌어다 놓거나 클릭해서 선택하세요"
-              accept=".pdf,application/pdf"
-              file={pdf}
-              onFiles={addFiles}
-            />
-            <DropZone
-              title="녹음 파일"
-              hint="오디오 파일을 끌어다 놓거나 클릭해서 선택하세요"
-              accept="audio/*,video/*,.m4a,.mp3,.wav"
-              file={audio}
-              onFiles={addFiles}
-            />
-          </div>
-
-          <label className="model-choice">
-            음성 인식 모델
-            <select
-              value={speechModel}
-              disabled={showingLive}
-              onChange={(event) => setSpeechModel(event.target.value)}
-            >
-              {SPEECH_MODELS.map((model) => (
-                <option key={model.value} value={model.value}>
-                  {model.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="recorder">
-            {!showingLive && (
-              <label className="present-choice">
-                <input
-                  type="checkbox"
-                  checked={presenting}
-                  onChange={(event) => setPresenting(event.target.checked)}
-                />
-                발표 모드
-              </label>
-            )}
-            {recording ? (
-              <>
-                <span className="recording-dot" aria-hidden="true" />
-                <span className="timer" role="timer">
-                  {formatTimer(recorder.seconds)}
-                </span>
-                <button onClick={stopRecording} disabled={recorder.state !== 'recording'}>
-                  녹음 중지
-                </button>
-              </>
-            ) : (
-              !stopped && (
-                <button disabled={!liveId} onClick={startRecording}>
-                  {pdf ? '실시간 녹음 시작' : '슬라이드를 먼저 선택하세요'}
-                </button>
-              )
-            )}
-          </div>
-          {pdf && (
-            <p className="live-status" role="status">
-              {liveStatusText(liveStatus, stopped, chunksSent)}
-            </p>
-          )}
-          {recorder.error && (
-            <p className="error" role="alert">
-              {recorder.error}
-            </p>
-          )}
-          {!showingLive && (
-            <button className="primary" disabled={!pdf || !audio || uploading} onClick={start}>
-              {uploading ? '업로드 중…' : '시작'}
-            </button>
-          )}
-        </>
-      )}
-
-      {running && (
-        <>
-          <ol className="steps">
-            {STEPS.map((step, index) => (
-              <li
-                key={step.state}
-                className={
-                  index < activeIndex ? 'finished' : index === activeIndex ? 'active' : undefined
-                }
-              >
-                {step.label}
-              </li>
-            ))}
-          </ol>
-          <p className="hint">
-            노트북 CPU에서는 받아쓰기에 녹음 길이만큼 시간이 걸릴 수 있습니다.
-          </p>
-        </>
-      )}
-
-      {error && (
-        <div className="error" role="alert">
-          <p>{error}</p>
-          {jobId && <button onClick={reset}>다시 시도</button>}
-          {jobId && <a className="button" href={`#/jobs/${jobId}`}>지금까지의 결과 보기</a>}
-        </div>
-      )}
-    </main>
-  )
+  return <div className="landing"><header className="site-header"><Brand/><nav aria-label="주 메뉴">{recent&&<a href={`#/jobs/${recent}`}>최근 강의 이어보기 ↗</a>}<button className="text-button" onClick={()=>setLive(!live)}>{live?'파일 업로드':'실시간 녹음'}</button></nav></header>
+    {live?<><button className="back-link" onClick={()=>setLive(false)}>← 파일 업로드로 돌아가기</button><LiveUploadScreen onDone={onDone}/></>:<main>
+      <section className="hero" aria-labelledby="hero-title"><div className="eyebrow"><span/> YOUR LECTURE. EVERY DETAIL.</div><h1 id="hero-title">강의 녹음과<br/><span>슬라이드만 올리세요.</span></h1><p>교수님의 설명을 듣고, 중요한 내용을<br className="mobile-break"/> 슬라이드 위에 필기로 정리합니다.</p></section>
+      <section className="upload-panel" aria-label="강의 파일 업로드"><div className="panel-heading"><span><Icon name="spark" size={18}/> 새로운 강의 노트</span><span className="step-caption">01 — 파일 준비</span></div>
+        <fieldset disabled={uploading} className="upload-fields"><legend className="sr-only">PDF와 녹음 파일</legend><div className="file-grid"><FileCard kind="pdf" file={pdf} onFile={setPdf} onError={setError}/><FileCard kind="audio" file={audio} onFile={setAudio} onError={setError}/></div></fieldset>
+        <div className="upload-preferences"><span>필기를 얼마나 자세하게 할까요?</span><DensityControl value={density} onChange={setDensity} disabled={uploading}/></div>
+        <details className="advanced"><summary>필기 설정</summary><label><input type="checkbox" checked={grounding} disabled={uploading} onChange={e=>setGrounding(e.target.checked)}/> 슬라이드 요소에 정밀하게 연결 <span className="muted">· 추가 시간이 필요할 수 있어요</span></label></details>
+        {error&&<div className="error-box" role="alert">{error}</div>}
+        <button className="primary generate" onClick={start} disabled={!pdf||!audio||uploading}><Icon name={uploading?'upload':'spark'}/>{uploading?progress===null?'파일 전송 준비 중…':`파일 업로드 중 ${progress}%`:'AI 필기 생성하기'}<Icon name="arrow" size={19}/></button>
+        <p className="upload-hint" role="status">{!pdf||!audio?'PDF와 녹음 파일을 모두 선택하면 시작할 수 있어요.':'준비됐어요. 강의 속 중요한 순간을 노트로 남겨보세요.'}</p>
+      </section>
+      <section className="benefits" aria-label="classNote로 복습하기">{[['shield','발화에 근거한 필기','교수님의 설명과 필기의 출처를 함께 확인하세요.'],['clock','필요한 순간, 다시 듣기','페이지와 필기를 눌러 연결된 강의로 돌아가세요.'],['note','슬라이드 그대로, 더 풍부하게','원본을 보존한 필기 PDF와 상세 노트를 받아보세요.']].map(([icon,title,description])=><article key={title}><Icon name={icon}/><h2>{title}</h2><p>{description}</p></article>)}</section>
+      <section className="product-glimpse" aria-label="필기 표현 예시"><div><span className="eyebrow">LESS REWINDING. MORE UNDERSTANDING.</span><h2>다시 들을 순간까지,<br/>한 장의 노트에.</h2><p>짧은 필기는 슬라이드에, 긴 설명은 상세 노트에.<br/>읽다가 궁금해지면 원래 강의를 바로 들어보세요.</p></div><div className="sample-paper"><small>필기 표현 예시 · 수학 강의</small><h3>Additive inverse</h3><p className="sample-formula">z + (−z) = 0</p><span className="sample-underline"/><p className="sample-note">실수부와 허수부가<br/>각각 상쇄되는 값</p><span className="sample-evidence"><Icon name="play" size={12}/> 발화 근거와 함께 복습</span></div></section>
+    </main>}<footer className="site-footer"><Brand/><span>강의의 맥락이 남는 필기.</span></footer></div>
 }

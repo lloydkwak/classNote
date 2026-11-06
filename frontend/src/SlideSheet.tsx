@@ -9,7 +9,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 ).toString()
 
 // Served from public/, so PDFs with CJK fonts render with no network at the venue.
-const PDF_OPTIONS = {
+export const PDF_OPTIONS = {
   cMapUrl: '/cmaps/',
   cMapPacked: true,
   standardFontDataUrl: '/standard_fonts/',
@@ -25,7 +25,6 @@ export const TYPE_LABELS: Record<NoteType, string> = {
 
 /** Each side of the page gets this share of its width to write in. Matches layout.py. */
 const GUTTER_RATIO = 0.28
-const SHEET_WIDTH_RATIO = 1 + 2 * GUTTER_RATIO
 
 const toPoints = (stroke: [number, number][]) => stroke.map(([x, y]) => `${x},${y}`).join(' ')
 
@@ -45,6 +44,8 @@ export function isPlaying(note: Annotation, time: number) {
 
 /** Draws one slide with its handwritten notes, as large as fits in the parent. */
 export function SlideSheet(props: {
+  zoom?: number
+  original?: boolean
   file: string
   page: number
   annotations?: PageAnnotations
@@ -74,14 +75,20 @@ export function SlideSheet(props: {
     return () => observer.disconnect()
   }, [])
 
-  const sheetWidth = Math.floor(Math.min(stage.width, stage.height * aspect * SHEET_WIDTH_RATIO))
+  const slideWidth=annotations?.width??960
+  const slideHeight=annotations?.height??slideWidth/aspect
+  const gutter=props.original?0:annotations?.gutter??slideWidth*GUTTER_RATIO
+  const totalWidth=slideWidth+2*gutter
+  const totalHeight=annotations?.output_height??slideHeight
+  const ratio=totalWidth/slideWidth
+  const sheetWidth = Math.floor(Math.min(stage.width, stage.height * totalWidth/totalHeight)*(props.zoom??1))
 
   return (
     <div className="stage" ref={stageRef}>
-      <div className={`sheet${props.dimInactive ? ' has-active' : ''}`} style={{ width: sheetWidth }}>
+      <div className={`sheet${props.dimInactive ? ' has-active' : ''}`} style={{ width: sheetWidth,height:sheetWidth*totalHeight/totalWidth }}>
         <div
           className="page-frame"
-          style={{ marginInline: `${(GUTTER_RATIO / SHEET_WIDTH_RATIO) * 100}%` }}
+          style={{ position:'absolute',left:`${gutter/totalWidth*100}%`,width:`${slideWidth/totalWidth*100}%`,top:0 }}
         >
           <Document
             file={props.file}
@@ -94,7 +101,7 @@ export function SlideSheet(props: {
             {sheetWidth > 0 && (
               <Page
                 pageNumber={props.page}
-                width={sheetWidth / SHEET_WIDTH_RATIO}
+                width={sheetWidth / ratio}
                 renderAnnotationLayer={false}
                 onLoadSuccess={(page) => setAspect(page.originalWidth / page.originalHeight)}
                 loading={<p className="muted">페이지 불러오는 중…</p>}
@@ -123,7 +130,7 @@ export function SlideSheet(props: {
           <svg
             className={`ink font-${props.noteFont ?? 'pretendard'}`}
             viewBox={`${-annotations.gutter} 0 ${annotations.width + 2 * annotations.gutter} ${
-              annotations.height
+              totalHeight
             }`}
             preserveAspectRatio="none"
             aria-hidden="true"
@@ -165,6 +172,7 @@ export function SlideSheet(props: {
                     <polyline
                       key={index}
                       className="mark"
+                      style={{strokeWidth:sketch.stroke_width??1.6,opacity:sketch.stroke_opacity??1}}
                       pathLength={1}
                       points={toPoints(stroke)}
                     />
@@ -193,7 +201,7 @@ export function SlideSheet(props: {
                       y={sketch.y + index * sketch.line_height + sketch.font_size}
                       style={{ animationDelay: `${before + textStart + index * LINE_SECONDS}s` }}
                     >
-                      {line}
+                      {line.split(/([=+−α-ωΑ-Ω-]+)/).map((run,i)=><tspan key={i} style={/^[=+−α-ωΑ-Ω-]+$/.test(run)?{fontFamily:'serif'}:undefined}>{run}</tspan>)}
                     </text>
                   ))}
                 </g>
@@ -201,6 +209,9 @@ export function SlideSheet(props: {
             })}
           </svg>
         )}
+        {onPlayNote&&notes.map(note=><button key={note.id} className="note-access" aria-label={`필기 재생: ${note.note}`}
+          style={{left:`${(note.sketch.x+gutter)/totalWidth*100}%`,top:`${note.sketch.y/totalHeight*100}%`,width:`${note.sketch.width/totalWidth*100}%`,height:`${note.sketch.height/totalHeight*100}%`}}
+          onClick={()=>onPlayNote(note)}/>)}
       </div>
     </div>
   )

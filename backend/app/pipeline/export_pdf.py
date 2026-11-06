@@ -39,7 +39,9 @@ def _add_ink(page: pymupdf.Page, strokes: list, offset: float, width: float, not
     shifted = [[(x + offset, y) for x, y in stroke] for stroke in strokes]
     ink = page.add_ink_annot(shifted)
     ink.set_colors(stroke=COLORS[note.type])
-    ink.set_border(width=width)
+    ink.set_border(width=note.sketch.stroke_width if width==MARK_WIDTH else width)
+    if width==MARK_WIDTH:
+        ink.set_opacity(note.sketch.stroke_opacity)
     content=note.note if note.provenance is None else json.dumps(
         {"annotation_id":note.id,"quote":note.quote,"note":note.note,
          "provenance":note.provenance.model_dump(mode="json")},ensure_ascii=False)
@@ -64,14 +66,16 @@ def _write_note(page: pymupdf.Page, note: Annotation, offset: float, font_name: 
 
 def export_annotated_pdf(source: Path, annotations: Annotations, output: Path) -> None:
     notes_by_page = {page.page: page.notes for page in annotations.pages}
+    geometry={page.page:page for page in annotations.pages}
     font_name = annotations.note_font
     with pymupdf.open(source) as original, pymupdf.open() as document:
         for index, source_page in enumerate(original):
             width, height = source_page.rect.width, source_page.rect.height
             rotation=source_page.rotation
             source_page.set_rotation(0)  # In-memory only: show_pdf_page otherwise ignores /Rotate.
-            gutter = gutter_width(width)
-            page = document.new_page(width=width + 2 * gutter, height=height)
+            layout=geometry.get(index+1)
+            gutter = layout.gutter if layout else gutter_width(width)
+            page = document.new_page(width=width + 2 * gutter, height=layout.output_height or height if layout else height)
             page.show_pdf_page(pymupdf.Rect(gutter, 0, gutter + width, height), original, index,rotate=-rotation)
             notes = notes_by_page.get(index + 1, [])
             if not notes:

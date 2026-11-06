@@ -2,10 +2,10 @@
 
 import logging
 import re
-import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -48,10 +48,11 @@ def _write_status(folder: Path, status: str, error: str | None = None, **counts:
     (folder / STATUS_NAME).write_text(job_status.model_dump_json(), encoding="utf-8")
 
 
-def _run_job(job_id: str) -> None:
+def _run_job(job_id: str, from_step: str | None = None) -> None:
     folder = pipeline.job_dir(job_id)
     try:
-        pipeline.run_pipeline(job_id, on_status=lambda status: _write_status(folder, status))
+        options={"from_step":from_step} if from_step else {}
+        pipeline.run_pipeline(job_id, on_status=lambda status: _write_status(folder, status),**options)
         _write_status(folder, "done")
     except Exception as error:
         log.exception("Job %s failed", job_id)
@@ -68,7 +69,15 @@ def _save_upload(upload: UploadFile, directory: Path, default_suffix: str) -> Pa
     suffix = Path(upload.filename or "").suffix.lower() or default_suffix
     path = directory / f"upload{default_suffix}{suffix}"
     with path.open("wb") as file:
-        shutil.copyfileobj(upload.file, file)
+        limit=(100 if default_suffix==".pdf" else 1024)*1024*1024
+        size=0
+        while chunk:=upload.file.read(1024*1024):
+            size+=len(chunk)
+            if size>limit:
+                raise HTTPException(413,"파일이 업로드 크기 제한을 초과했습니다.")
+            file.write(chunk)
+        if not size:
+            raise HTTPException(400,"빈 파일은 업로드할 수 없습니다.")
     return path
 
 
@@ -175,11 +184,12 @@ def _serve(job_id: str, name: str, media_type: str, not_ready: str) -> FileRespo
 
 
 @router.get("/{job_id}/annotations")
-def get_annotations(job_id: str, density: Density | None = None):
+def get_annotations(job_id: str, density: Density | None = None, layout: Literal["v1","v2"] | None = None,
+                    ink_style: Literal["clean","natural","highlighter"] = "natural"):
     folder = _folder(job_id)
     if (folder / pipeline.CONTENT_NAME).exists():
         try:
-            return pipeline.density_annotations(job_id, density or "balanced")
+            return pipeline.density_annotations(job_id, density or "balanced",layout,ink_style)
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
     return _serve(
@@ -219,19 +229,41 @@ def get_audio(job_id: str) -> FileResponse:
 
 
 @router.get("/{job_id}/annotated.pdf")
-def get_annotated_pdf(job_id: str, density: Density | None = None) -> FileResponse:
+def get_annotated_pdf(job_id: str, density: Density | None = None, layout: Literal["v1","v2"] | None = None,
+                      ink_style: Literal["clean","natural","highlighter"] = "natural") -> FileResponse:
     """Live jobs skip the export, to show notes sooner, so it's made on first request."""
     folder = _folder(job_id)
     if (folder / pipeline.CONTENT_NAME).exists():
         density = density or "balanced"
         try:
-            target=pipeline.export_density(job_id,density)
+            target=pipeline.export_density(job_id,density,layout=layout,ink_style=ink_style)
         except ValueError as error:
             raise HTTPException(409,str(error)) from error
         return FileResponse(target, media_type="application/pdf")
     if not (folder / EXPORT_NAME).exists() and (folder / pipeline.ANNOTATIONS_NAME).exists():
         pipeline.export_job(job_id)
     return _serve(job_id, EXPORT_NAME, "application/pdf", "annotated.pdf가 아직 준비되지 않았습니다.")
+
+
+@router.post("/{job_id}/retry", status_code=202)
+def retry_job(job_id: str):
+    folder=_folder(job_id)
+    status=get_status(job_id)
+    incomplete=False
+    if status.status=="done" and (folder/pipeline.CONTENT_NAME).exists():
+        try:
+            incomplete=not pipeline.read_detailed_notes(job_id).complete
+        except ValueError:
+            raise HTTPException(409,"원본 또는 정렬이 변경되어 작업을 다시 확인해야 합니다.")
+    if status.status!="error" and not incomplete:
+        raise HTTPException(409,"실패한 작업만 다시 실행할 수 있습니다.")
+    _write_status(folder,"queued")
+    # Original uploads stay in place. Existing stage caches avoid repeat provider calls.
+    if incomplete:
+        _executor.submit(_run_job,job_id,"notes")
+    else:
+        _executor.submit(_run_job,job_id)
+    return {"job_id":job_id}
 
 
 @router.get("/{job_id}/debug")

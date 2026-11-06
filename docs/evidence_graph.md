@@ -1,5 +1,9 @@
 # Phase D — production evidence graph (2026-11-06)
 
+Phase E는 이 graph/ID 체인을 재사용하고 선택적 Layout v2의 geometry와 render revision을
+추가한다. figure block만 확인된 경우 v2에서는 큰 원/세부 connector를 생략한다.
+기본 v1 렌더 정책과 구분할 것. 현재 확장 필드/캐시/overflow는 [Layout v2](layout_v2.md) 참고.
+
 기본 annotation 경로는 그대로다. 오프라인 job의 `visual_grounding=true`일 때만 기존
 Rich Notes → Phase C ID 선택 → 기존 layout/export를 연결한다. graph DB, 새로운 의미 추출
 LLM, 새 모델/문서 패키지는 추가하지 않았다. 실강의 원본은 이 clone에서 발견하지 못했다.

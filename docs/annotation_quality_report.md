@@ -1,4 +1,94 @@
-# Advanced annotation quality — Phase D (2026-11-06)
+# Advanced annotation quality — Phase E (2026-11-06)
+
+## Phase E 최종 검증
+
+이번에는 실제 사용자 강의 job `6c094c2fe7cc`의 11페이지 PDF/녹음/37 STT segments/정렬/
+기존 Rich Notes가 존재한다. 원본을 새 state 디렉터리로 복사하고 **동일한 저장 지식과
+grounding**으로 v1/v2를 비교했다. STT/정렬/semantic extraction 모델을 다시 실행하지 않았다.
+VLM factory 호출은 평가 runner에서 막았다. 새 실제 GPU 추론0, 새 실제 LLM 호출0이다.
+
+### 산출물 및 시각 검토
+
+- 실제 강의: `data/phase-e-runs/final-real/`.
+- Phase D 합성 지식/grounding 재사용: `data/phase-e-runs/final-synthetic/`.
+- 각 폴더에 `baseline.pdf`, `layout-v2.pdf`, `contact-sheet.png`, `annotations.json`,
+  `layout-debug.json`, `metrics.json`, `report.json`, `evidence_graph.json` 저장.
+- 합성 capacity probe: `final-synthetic/overflow.pdf`, `overflow-preview.png`.
+- 0/90/180/270 및 crop의 독립 좌표 fixture: `data/phase-e-runs/rotation-review/`.
+  실제 VLM 선택 검증이 아닌 수동 native-coordinate fixture임을 report에 명시했다.
+- UI before: `data/phase-e-runs/e-01/frontend-before.png`, `workspace-before.png`.
+- UI 최종: `data/phase-e-runs/frontend-final/`: landing desktop/mobile, processing, error,
+  result desktop/mobile/768/1280, mobile notes/pages, report.json. 실제 Chromium으로 확인했다.
+
+실제 강의의 3/4/5/6페이지, 합성 수식·기호·그림, overflow와 회전/crop PNG를 직접 확인했다.
+3페이지 수식 유도 노트, 5페이지 그림 바깥 메모 및 거대한 원 제거를 확인했다.
+5페이지의 기존 설명은 z/α/β를 사용하지만 그림 표기는 w/γ/δ다. **이 의미 불일치를 고쳤다고
+주장하지 않는다.** 내부 기호를 확인하지 않은 figure block의 circle/connector는 생략하고
+기존 설명/출처를 여백에 유지한다. UI에서도 세부 기호 의미 확인이 필요함을 알린다.
+
+### 같은 입력의 기하학 비교
+
+| 측정 | 실제 강의 v1 → v2 | 합성 v1 → v2 |
+|---|---|---|
+| 선택 action → 렌더 / provenance | 4→4 / 4→4 | 7→7 / 7→7 |
+| action-to-render retention | 1.0→1.0 | 1.0→1.0 |
+| 검증 target의 배치 | 1/1→1/1 (figure block) | 5/5→5/5 |
+| annotation textbox / native text 가림 면적 | 0→0 | 0→0 |
+| textbox overlap / out of page | 0→0 / 0→0 | 0→0 / 0→0 |
+| connector 교차 | 0→0 (개선 주장 없음) | 1→0 |
+| connector/native text 간섭 | 0→0 | 5→0 |
+| ink/native text 간섭 | 2→0 | 13→0 |
+| figure 영역 stroke 간섭 | 1→0 | 1→0 |
+| native caption 간섭 | 0→0 | 2→0 |
+| 명시적 connector 생략 | 0→1 | 0→1 |
+| 페이지 수 / 원본 추출 텍스트 유지 | 11/11, 유지 | 1/1, 유지 |
+
+미검증 figure 세부 대상을 가리키는 connector 1개씩을 의도적으로 생략했다.
+모든 connector를 삭제해서 교차만 줄인 것이 아니다. 합성의 나머지 검증된 word/symbol/formula는
+직접/routed connector, word underline, α circle, ∇ native underline, formula bracket을 사용한다.
+∇ circle은 인접 glyph와 충돌하여 native bbox underline으로 안전하게 바꿨다.
+
+이 수치는 native bbox 기반 collision proxy다. 래스터 이미지 내부 글씨와 사람의 가독성,
+의미적 정확도를 전부 측정하지 않는다. `annotation_placement_rate`와 retention은 이미
+선택된 item의 분모만 사용한다. 실강의 전체 semantic coverage/human accuracy가 아니다.
+
+capacity probe는 기존 문장을 반복한 **합성 배치 용량 테스트**다. 12개 긴 메모를 전부 보존하고
+원본 높이540pt에서 약4913.76pt 하단 band로 확장했다. overlap/out-of-bounds0이다.
+추가 강의 지식12개를 추출했다는 뜻이 아니며, 이 길이에서는 향후 continuation page가 더 적합하다.
+현재 구현은 margin+하단 band이며 별도 이어지는 노트 페이지와 OR-Tools solver는 미구현이다.
+
+### 실제 누락 원인과 정렬 진단
+
+| 페이지 | 저장 정렬 구간 | aligned segments | 검증된 지식 | 확인된 upstream 상태 |
+|---|---|---:|---:|---|
+| 3 | 1.30–77.94s | 10 | 1 | unsupported_number1, 최소 정렬 신호0.01984 |
+| 4 | 78.28–108.38s | 5 | 0 | 숫자 예제 후보2개가 unsupported_number로 거절 |
+| 5 | 112.20–148.71s | 5 | 1 | unsupported_number1, 세부 기호 의미 불일치 미해결 |
+| 6 | 152.02–220.06s | 9 | 0 | 추출 ValueError/unavailable, 최소 정렬 신호0 |
+
+시간은 현재 알고리즘의 저장 결과이며 사람 검증된 정답이 아니다. 페이지 정렬을 개선하지 않았다.
+0.01984/0 같은 신호는 정확도 확률이 아니다. low-signal 연결은 UI에서 확정적으로 안내하지 않고
+자동 page-follow도 해당 불확실 구간이나 off-topic 시간을 단정해서 이동하지 않는다.
+4/6페이지는 v2에서도 필기를 임의 생성하지 않는다. UI loss audit에 근거 검증/추출 실패를 드러낸다.
+영어 zero/one과 숫자 표기 등 숫자 검증의 false rejection 가능성은 후속 source-aware 검토 대상이며
+이번에는 validator를 완화해 기존 거절을 accepted로 승격하지 않았다.
+
+### 테스트와 성능
+
+baseline backend432/frontend25. 최종 backend445(기존+새13), frontend28(기존25+파일검증3),
+production build 통과. 실제 Chromium7개 시나리오 통과, page errors0, 375/768/1280/1440 가로 overflow0.
+실제 multipart job 생성은 mock 공급자 API를 이용했고, 결과 PDF/오디오 제어는 실제 강의 복사본으로
+확인했다. processing/error는 명시적 상태 fixture다. microphone/타 브라우저/스크린리더는 미검증이다.
+
+실제 `decode_audio` WAV 회귀와 PyAV18.1.0 lock 고정 검증 통과. 환경 sync/모델 다운로드 없음.
+CPU 시간은 각 `report.json.cpu_seconds`에 기록했다(계획+export 포함, 요청/개별 페이지 latency와 구분).
+대표 반복에서 실강의 v2 약1.76s/전체11페이지, 합성 v2 약0.24s/1페이지였다. 모델 latency/VRAM을
+새로 측정하지 않았다. Qwen3-VL8B NF4 설정/SSD cache는 그대로이며 Phase D 실측을 재사용한다.
+Build의 기존 큰 bundle 경고와 lint의 React hooks/fast-refresh 경고는 남아 있으며 errors는 없다.
+
+---
+
+# 과거 검증 — Phase D (2026-11-06)
 
 ## 현재 검증 범위
 

@@ -52,6 +52,8 @@ class LayoutNote:
     double: bool  # Underline twice, for exam hints.
     blocks: list[Block]
     mark: str | None = None
+    target_kind: str | None = None
+    rotation: int = 0
 
 
 def note_font_path(name: str) -> Path:
@@ -77,7 +79,10 @@ def text_runs(line: str, font_name: str) -> list[tuple[str, bool]]:
     font = load_note_font(font_name)
     runs: list[tuple[str, bool]] = []
     for char in line:
-        fallback = not char.isspace() and not font.has_glyph(ord(char))
+        # Keep math in the existing CJK math-capable fallback. The bundled handwriting /
+        # Pretendard font advertises some operator glyphs that render as icons in PDFs.
+        math_char=bool(re.fullmatch(r"[=+−α-ωΑ-Ω-]",char))
+        fallback = math_char or (not char.isspace() and not font.has_glyph(ord(char)))
         if runs and (runs[-1][1] == fallback or char.isspace()):
             runs[-1] = (runs[-1][0] + char, runs[-1][1])
         else:

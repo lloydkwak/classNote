@@ -1,4 +1,9 @@
-# LectureNote
+# classNote
+
+Phase E adds an opt-in [Layout v2](docs/layout_v2.md) and a redesigned upload/progress/PDF workspace.
+See the [Ubuntu runbook](docs/ubuntu_vlm.md), [frontend design](docs/frontend_design.md),
+and [measured quality report](docs/annotation_quality_report.md). The real lecture's extraction/alignment
+failures remain visible; layout improvements do not imply improved lecture coverage.
 
 Upload a lecture recording and its PDF slides. LectureNote finds which part of the slides the professor was explaining at each moment and attaches notes there. Clicking a note plays that part of the recording.
 

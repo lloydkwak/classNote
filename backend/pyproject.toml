@@ -5,6 +5,7 @@ description = "Auto-annotate lecture slides from a lecture recording"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.40",
+    "av==18.1.0",  # faster-whisper decode_audio compatibility (19.x metadata_errors regression)
     "fastapi>=0.115",
     "faster-whisper>=1.1",
     "google-genai>=1.0",

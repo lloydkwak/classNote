@@ -4,6 +4,9 @@ type Point = [number, number]
 
 /** How to draw a note by hand, in PDF points. annotated.pdf draws the same data. */
 export interface Sketch {
+  stroke_width?: number
+  stroke_opacity?: number
+  placement?: { status: string; reason: string; fallback_mode?: string | null }
   mark: 'underline' | 'circle' | 'bracket' | 'none'
   strokes: Point[][]
   arrow: Point[][]
@@ -42,6 +45,8 @@ export interface Annotation {
 }
 
 export interface PageAnnotations {
+  output_height?: number | null
+  layout_metrics?: Record<string,number|null>
   page: number
   width: number
   height: number
@@ -50,6 +55,10 @@ export interface PageAnnotations {
 }
 
 export interface Annotations {
+  layout_engine?: 'v1' | 'v2'
+  ink_style?: InkStyle
+  title?: string
+  loss_audit?: PageAudit[]
   grounding?: { status: string; metrics: Record<string, unknown> } | null
   job_id: string
   pages: PageAnnotations[]
@@ -118,6 +127,12 @@ export interface JobStatus {
 export const pdfUrl = (jobId: string) => `/api/jobs/${jobId}/pdf`
 export const audioUrl = (jobId: string) => `/api/jobs/${jobId}/audio`
 export type Density = 'minimal' | 'balanced' | 'detailed'
+export type InkStyle = 'clean' | 'natural' | 'highlighter'
+export interface PageAudit {
+  page: number; title: string; alignment_uncertain: boolean; alignment_confidence_min: number | null
+  aligned_segments: number; evidence_valid_knowledge: number; rendered_annotations: number
+  reasons: Record<string,number>; extraction_unavailable: boolean
+}
 export interface ContentItem {
   id: string
   page: number
@@ -136,10 +151,11 @@ export interface DetailedNotes {
 }
 export const getDetailedNotes = (jobId: string) =>
   getJson<DetailedNotes>(`/api/jobs/${jobId}/detailed-notes`)
-export const annotatedPdfUrl = (jobId: string, density: Density = 'balanced') =>
-  `/api/jobs/${jobId}/annotated.pdf?density=${density}`
+export const annotatedPdfUrl = (jobId: string, density: Density = 'balanced',layout: 'v1'|'v2' = 'v1',inkStyle: InkStyle = 'natural') =>
+  `/api/jobs/${jobId}/annotated.pdf?density=${density}&layout=${layout}&ink_style=${inkStyle}`
 
 async function errorMessage(response: Response): Promise<string> {
+  if(response.status>=500)return '서버에서 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
   try {
     const body = await response.json()
     if (typeof body.detail === 'string') return body.detail
@@ -168,10 +184,17 @@ function jobForm(pdf: File, speechModel: string) {
   return form
 }
 
-export async function createJob(pdf: File, audio: File, speechModel = ''): Promise<string> {
+export async function createJob(pdf: File, audio: File, speechModel = '',options: {visualGrounding?:boolean;onProgress?:(percent:number)=>void} = {}): Promise<string> {
   const form = jobForm(pdf, speechModel)
   form.append('audio', audio)
-  return (await postForm('/api/jobs', form)).job_id
+  if(options.visualGrounding!==undefined)form.append('visual_grounding',String(options.visualGrounding))
+  if(!options.onProgress)return (await postForm('/api/jobs', form)).job_id
+  return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();xhr.open('POST','/api/jobs');xhr.responseType='json'
+    xhr.upload.onprogress=e=>{if(e.lengthComputable)options.onProgress?.(Math.round(e.loaded/e.total*100))}
+    xhr.onload=()=>{if(xhr.status>=200&&xhr.status<300&&typeof xhr.response?.job_id==='string')resolve(xhr.response.job_id);else reject(new Error('업로드하지 못했습니다.'))}
+    xhr.onerror=()=>reject(new Error('네트워크 연결을 확인해 주세요.'));xhr.send(form)
+  })
 }
 
 export async function createLiveJob(pdf: File, speechModel = ''): Promise<string> {
@@ -190,5 +213,6 @@ export const finishLiveJob = (jobId: string) => postForm(`/api/jobs/${jobId}/fin
 export const getStatus = (jobId: string) => getJson<JobStatus>(`/api/jobs/${jobId}`)
 export const getAlignment = (jobId: string) => getJson<Alignment>(`/api/jobs/${jobId}/debug`)
 export const getPageAudio = (jobId: string) => getJson<PageAudio>(`/api/jobs/${jobId}/page-audio`)
-export const getAnnotations = (jobId: string, density: Density = 'balanced') =>
-  getJson<Annotations>(`/api/jobs/${jobId}/annotations?density=${density}`)
+export const getAnnotations = (jobId: string, density: Density = 'balanced',layout: 'v1'|'v2' = 'v1',inkStyle: InkStyle = 'natural') =>
+  getJson<Annotations>(`/api/jobs/${jobId}/annotations?density=${density}&layout=${layout}&ink_style=${inkStyle}`)
+export const retryJob = (jobId:string)=>postForm(`/api/jobs/${jobId}/retry`)

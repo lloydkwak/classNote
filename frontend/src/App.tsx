@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { DebugScreen } from './DebugScreen'
 import { InspectorScreen } from './InspectorScreen'
 import { UploadScreen } from './UploadScreen'
-import { ViewerScreen } from './ViewerScreen'
+import { JobScreen } from './JobScreen'
 import './App.css'
+import './premium.css'
 
 /** Routes are `#/jobs/<id>` and `#/jobs/<id>/debug`, so a job can be reopened or bookmarked. */
 function routeFromHash() {
@@ -26,6 +27,6 @@ export default function App() {
 
   if (jobId && inspect) return <InspectorScreen key={jobId} jobId={jobId} />
   if (jobId && debug) return <DebugScreen key={jobId} jobId={jobId} />
-  if (jobId) return <ViewerScreen key={jobId} jobId={jobId} />
+  if (jobId) return <JobScreen key={jobId} jobId={jobId} />
   return <UploadScreen onDone={onDone} />
 }

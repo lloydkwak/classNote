@@ -1,5 +1,55 @@
 # Codex handoff — 2026-11-06
 
+## 최신 Phase E 인수인계 (이 절 우선)
+
+- 시작 HEAD `8345a5f` clean main. Phase E 코드·테스트·문서는 사용자의 후속 요청에 따라 커밋했다. push는 수행하지 않았다.
+- 실제 강의 원본은 이제 존재: `data/jobs/6c094c2fe7cc` (11pages,m4a/MP3,37segments).
+  원본 PDF/audio 보존. 비교/후속 브라우저 작업은 별도 `data/phase-e-runs/` state 복사본이다.
+- `pipeline/layout_v2.py` → 기존 consolidate/run/export에 연결. backend 기본 `LAYOUT_ENGINE=v1`.
+  API `layout=v2&ink_style=natural`; 새 UI는 명시적 v2. detailed_notes 없는 job은 기존 결과 사용.
+- Page.rotation, output_height/layout_metrics, Sketch stroke/placement, root layout/style/loss_audit는
+  backward-compatible defaults. SVG/PDF 동일 geometry, 원본 크기 유지, margin+하단band 확장.
+- `LayoutNote.target_kind`는 canonical provenance에서 전달. proxy Block.kind가 figure여도
+  formula로 구분하고 bracket을 그린다. 회전된 밑줄/bracket은 원본 baseline 방향을 따른다.
+- v2는 density threshold 유지 + `allow_overflow`로 공간 예산에 따른 고우선순위 탈락 방지.
+  action 정책 `grounded-actions-v2-layout-overflow`; VLM raw cache는 재사용한다.
+- figure 내부 미확정은 circle/connector 없이 margin 설명만 보존. ∇ circle이 충돌하면
+  native glyph underline. 근거/target ID는 유지하고 reason을 기록한다.
+- `loss_audit.py`: 페이지별 원문 구간/정렬 신호·단계 counts/reasons. grounded count는 density
+  선택 전 기준. PDF export 전 render_failed는 null, 실제 validity는 평가 report로 분리한다.
+- 실제 React 교체: UploadScreen/JobScreen/ui/premium.css, Viewer/SlideSheet 확장,
+  LiveUploadScreen 보존. XHR upload percent, hash 복귀, 실패/partial retry, 3열/mobile tabs,
+  audio/density/style/zoom/원본 비교/다운로드. 기본 UI에서 내부 exception을 출력하지 않는다.
+- PyAV18.1.0/faster-whisper1.2.1. pyproject av pin, lock av만 변경(4+/36-),
+  uv lock --check offline 및 decode_audio WAV 통과. uv sync/venv merge/모델 다운로드 없음.
+- 최종 검증: backend445, frontend28, Chromium7 scenarios/pageerrors0, build 통과.
+  375/768/1280/1440 overflow0. 기존 bundle warning과 React lint warnings/errors0.
+- 실제 v1/v2: render/provenance4/4,11pages, 원본 추출 text 유지, figure 원 제거.
+  합성7/7,accepted target5/5, 교차1→0, native caption2→0, connector/text5→0.
+  각 dataset에서 figure connector1개는 명시적 생략이다. semantic coverage 아님.
+- artifact: `final-real`, `final-synthetic`, `frontend-final`, `rotation-review` under
+  `data/phase-e-runs/`. PDF/PNG/JSON을 직접 검토했다. 신규 실제 GPU/LLM 호출0.
+  overflow12개는 기존 문장 반복 capacity probe; 원본540pt+하단band로 약4913.76pt 출력.
+- 검증 서버8011/5177은 mock 공급자+`real-02/state` 복사본으로 격리했다. 실제 분석 서버는
+  Ubuntu runbook의8000/5173 명령. 다른 기존 프로세스를 종료하지 않았다.
+- 개발 browser 도구 ignored `.cache/browser`19MiB + `.cache/ms-playwright`701MiB.
+  추가 runtime 의존성0. 모델/키/사용자 자료/산출물은 Git에 추가하지 않는다.
+
+Phase F 우선순위:
+1. 실제4페이지 unsupported_number2: 영어 zero/one/숫자 표기 등 false rejection을 발화로 검증.
+   6페이지 `_ask` ValueError raw 실패 안전 재현. 임의 validation 완화/accepted 승격 금지.
+2. 5페이지 z/α/β 설명과 w/γ/δ 그림 의미 불일치. block 관계와 semantic 사실 확인 구분.
+3. page3 신호0.01984/page6 0. 저장 정렬 시간은 gold가 아니므로 사람 타임라인부터 확보.
+4. 숫자만 다른 반복 수식이 기존 repeated-header 휴리스틱으로 누락될 가능성 확인.
+   독립 coordinate fixture에서 발견했으며 parser 후속 회귀 대상으로 남긴다.
+5. continuation pages, 이미지 내 label/point/axis, 복잡한 route, 실제 microphone/Presentation,
+   Safari/Firefox/스크린리더 검토. 사람 gold로 실제 강의 A/B/coverage 평가.
+
+[layout_v2.md](layout_v2.md), [frontend_design.md](frontend_design.md),
+[품질 보고서](annotation_quality_report.md), [Ubuntu runbook](ubuntu_vlm.md)를 우선 읽을 것.
+
+---
+
 ## 최신 Ubuntu Phase D 상태 (아래 Windows 기록보다 우선)
 
 - `/root/classNote`, `main`, 시작 HEAD/GitHub main `9a4b00a`, 시작 시 clean.

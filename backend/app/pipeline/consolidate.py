@@ -33,9 +33,11 @@ def consolidate(
     extraction: PdfExtraction,
     job_id: str,
     max_notes_per_page: int = DEFAULT_MAX_NOTES_PER_PAGE,
+    layout_engine: str = "v1",
+    ink_style: str = "natural",
 ) -> Annotations:
     merged = merge_duplicates(notes)
-    font_name = get_settings().note_font
+    font_name = "nanum-pen" if layout_engine=="v2" and ink_style=="natural" else get_settings().note_font
     pages = []
     for page in extraction.pages:
         blocks = {block.block_id: block for block in page.blocks}
@@ -52,27 +54,33 @@ def consolidate(
                               text="",bbox=box,kind="figure" if note.target_mark in {"circle","bracket"} else "text")
                         for box in note.target_bboxes]
             return [blocks[bid] for bid in note.block_ids if bid in blocks]
-        sketches = layout_page(
-            [
+        layout_notes = [
                 LayoutNote(
                     id=note_id,
                     text=note.note,
                     double=note.type == "exam_hint",
                     blocks=targets(note),
                     mark=note.target_mark,
+                    target_kind=note.provenance.target_kind if note.provenance else None,
+                    rotation=page.rotation,
                 )
                 for note_id, note in zip(ids, chosen)
-            ],
-            page.width,
-            page.height,
-            font_name,
-        )
+            ]
+        result=None
+        if layout_engine=="v2":
+            from app.pipeline.layout_v2 import layout_page_v2
+            result=layout_page_v2(layout_notes,page,font_name,ink_style)
+            sketches=result.sketches
+        else:
+            sketches=layout_page(layout_notes,page.width,page.height,font_name)
         pages.append(
             PageAnnotations(
                 page=page.page,
                 width=page.width,
                 height=page.height,
-                gutter=gutter_width(page.width),
+                gutter=result.gutter if result else gutter_width(page.width),
+                output_height=result.output_height if result else None,
+                layout_metrics=result.metrics if result else {},
                 notes=[
                     Annotation(
                         content_id=note.content_id,
@@ -92,4 +100,5 @@ def consolidate(
                 ],
             )
         )
-    return Annotations(job_id=job_id, pages=pages, note_font=font_name)
+    return Annotations(job_id=job_id, pages=pages, note_font=font_name,layout_engine=layout_engine,ink_style=ink_style,
+                       title=extraction.pages[0].title if extraction.pages else "")

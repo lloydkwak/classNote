@@ -37,6 +37,7 @@ class Line(BaseModel):
 
 
 class Page(BaseModel):
+    rotation: int = 0  # Original /Rotate; v2 enriches this without changing registry coordinates.
     page: int
     title: str
     blocks: list[Block]
@@ -198,6 +199,9 @@ class Sketch(BaseModel):
     font_size: float
     line_height: float
     lines: list[str]  # Already wrapped, so both renderers break lines identically.
+    stroke_width: float = 1.6
+    stroke_opacity: float = 1.0
+    placement: dict = {}
 
 
 class Annotation(BaseModel):
@@ -221,9 +225,15 @@ class PageAnnotations(BaseModel):
     height: float
     gutter: float
     notes: list[Annotation]
+    output_height: float | None = None
+    layout_metrics: dict = {}
 
 
 class Annotations(BaseModel):
+    layout_engine: str = "v1"
+    ink_style: str = "natural"
+    title: str = ""
+    loss_audit: list[dict] = []
     grounding: dict | None = None
     planning: list[dict] = []
     job_id: str

@@ -255,15 +255,21 @@ def read_annotations(job_id: str) -> Annotations:
     return Annotations.model_validate_json(path.read_text(encoding="utf-8"))
 
 
-def density_annotations(job_id: str, density: Density) -> Annotations:
+def density_annotations(job_id: str, density: Density, layout: str | None = None, ink_style: str = "natural") -> Annotations:
     folder = job_dir(job_id)
     content_path = folder / CONTENT_NAME
     if not content_path.exists():
         return read_annotations(job_id)
     content = read_detailed_notes(job_id)
     extraction = _read_extraction(folder)
-    notes,actions,manifest = _plan_notes(folder,content,density)
-    annotations = consolidate(notes, extraction, job_id, max_notes_per_page=len(notes))
+    layout=layout or get_settings().layout_engine
+    if layout not in {"v1","v2"} or ink_style not in {"clean","natural","highlighter"}:
+        raise ValueError("unsupported layout or ink style")
+    if layout=="v2":
+        from app.pipeline.layout_v2 import enrich_geometry
+        enrich_geometry(folder/PDF_NAME,extraction)
+    notes,actions,manifest = _plan_notes(folder,content,density,allow_overflow=layout=="v2")
+    annotations = consolidate(notes, extraction, job_id, max_notes_per_page=len(notes),layout_engine=layout,ink_style=ink_style)
     annotations.incomplete = not content.complete
     annotations.planning = planning_report(content, annotations, density)
     if manifest is not None:
@@ -274,6 +280,8 @@ def density_annotations(job_id: str, density: Density) -> Annotations:
         for row in annotations.planning:
             action=by_item[row["item_id"]]
             row["grounding"]=action.provenance.model_dump(mode="json")
+    from app.pipeline.loss_audit import build_loss_audit
+    annotations.loss_audit=build_loss_audit(folder,content,annotations)
     return annotations
 
 
@@ -283,17 +291,17 @@ def _grounding_enabled(folder):
     return bool(options.get("visual_grounding",get_settings().visual_grounding))
 
 
-def _plan_notes(folder,content,density):
+def _plan_notes(folder,content,density,allow_overflow=False):
     extraction=_read_extraction(folder)
     if content.provenance.get("visual_grounding"):
         from app.pipeline.grounded_notes import plan_grounded
-        return plan_grounded(folder,content,extraction,density)
-    return plan_annotations(content,extraction,density),[],None
+        return plan_grounded(folder,content,extraction,density,allow_overflow=allow_overflow)
+    return plan_annotations(content,extraction,density,allow_overflow=allow_overflow),[],None
 
 
-def export_density(job_id,density,output=None):
+def export_density(job_id,density,output=None,layout=None,ink_style="natural"):
     folder=job_dir(job_id)
-    annotations=density_annotations(job_id,density)
+    annotations=density_annotations(job_id,density,layout,ink_style)
     import hashlib
     key=hashlib.sha256((hash_file(folder/PDF_NAME)+annotations.model_dump_json()
                        +hash_file(Path(__file__).with_name("export_pdf.py"))+"export-v2").encode()).hexdigest()[:20]
@@ -311,7 +319,7 @@ def export_density(job_id,density,output=None):
     content=read_detailed_notes(job_id)
     if content.provenance.get("visual_grounding"):
         from app.pipeline.grounded_notes import save_graph
-        _,actions,manifest=_plan_notes(folder,content,density)
+        _,actions,manifest=_plan_notes(folder,content,density,allow_overflow=annotations.layout_engine=="v2")
         save_graph(folder,content,_read_list(folder/SEGMENTS_NAME,Segment),_read_alignment(folder),
                    actions,manifest,annotations,density,
                    export={"file":target.name,"sha256":hash_file(target),"evidence_revision":annotations.grounding["revision"]})

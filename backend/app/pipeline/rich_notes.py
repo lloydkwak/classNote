@@ -201,7 +201,7 @@ def extract_content(alignment: Alignment, extraction: PdfExtraction, segments: l
     return result
 
 
-def plan_annotations(content: DetailedNotes, extraction: PdfExtraction, density: Density) -> list[Note]:
+def plan_annotations(content: DetailedNotes, extraction: PdfExtraction, density: Density, *, allow_overflow: bool = False) -> list[Note]:
     thresholds = {"minimal": 4, "balanced": 3, "detailed": 1}
     fractions = {"minimal": 0.25, "balanced": 0.5, "detailed": 0.8}
     planned = []
@@ -214,7 +214,7 @@ def plan_annotations(content: DetailedNotes, extraction: PdfExtraction, density:
                 continue
             text = item.short_note
             cost = 24 * max(1, (len(text) + 19) // 20)
-            if cost > budget:
+            if cost > budget and not allow_overflow:
                 continue
             budget -= cost
             note_type = {"worked_example": "example", "question_answer": "question"}.get(item.type, item.type)

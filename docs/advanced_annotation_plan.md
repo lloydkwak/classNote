@@ -1,5 +1,33 @@
 # Advanced annotation — Phase A/B, 2026-11-06
 
+## 최신 Phase E 상태
+
+시작 HEAD `8345a5f`, clean main. 실제 회귀 job `6c094c2fe7cc`의11페이지 PDF/녹음/37segments를
+찾았고 복사본에서 같은 저장 source/action의 v1/v2 PDF를 비교했다.
+
+- Layout v2 opt-in: native occupied/free-space 후보, seeded ink, bounded A* routing,
+  hard collision 배제, figure 세부 미확정 mark/connector 생략, 원본 크기 유지/확장 note band.
+- density threshold를 유지하고 v2 physical-space 예산으로 고우선순위 메모를 삭제하지 않음.
+  source/action/target/provenance 및 density/style/render cache 분리 유지.
+- 실제 React 기본 UI 교체: classNote dark upload, 실제 status polling/retry,
+  thumbnail/PDF/상세 노트, audio, density/style/download/zoom, 반응형. Live/Presentation 보존.
+- PyAV18.1.0 pin + av만 변경한 lock, 실제 decode_audio WAV 회귀. 환경 sync 없음.
+- 실제4개/합성7개 선택 필기·출처 보존. 합성 connector교차1→0, caption간섭2→0.
+  실제 강의 그림 원 제거. 원본 추출 text/bytes/페이지 수 보존 확인.
+- backend445, frontend28, Chromium7 scenarios, build 통과. lint 경고는 남음.
+- artifact: `data/phase-e-runs/final-real`, `final-synthetic`, `frontend-final`, `rotation-review`.
+
+실강의4페이지 unsupported_number2, 6페이지 추출 ValueError는 해결하지 않고 UI/audit로 드러낸다.
+5페이지 z/α/β 설명과 w/γ/δ 그림의 의미 불일치도 미해결이다. 정렬 개선이나 실강의 semantic
+coverage 개선을 주장하지 않는다. continuation pages/전역 solver/이미지 내부 geometry는 후속 범위다.
+
+상세: [layout_v2.md](layout_v2.md), [frontend_design.md](frontend_design.md),
+[기술 선정](phase_e_technology_decisions.md), [품질 보고서](annotation_quality_report.md).
+
+---
+
+아래는 Phase A–D 당시 계획/실측 기록이다.
+
 ## 현재 상태와 게이트
 
 - 시작: clean `main`, `28b3aa3`. GitHub `ls-remote`도 동일 SHA 확인.
