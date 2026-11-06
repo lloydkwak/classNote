@@ -36,6 +36,17 @@ def build_loss_audit(folder,content,annotations):
             "reasons":dict(reasons),"extraction_unavailable":any(v.status=="unavailable" for v in validation),
             "grounding_reasons":dict(Counter(n.provenance.fallback_reason for n in rendered if n.provenance and n.provenance.fallback_reason)),
             "layout_statuses":dict(Counter(n.sketch.placement.get("status","legacy") for n in rendered))})
+        agent_page=(annotations.agent_report or {}).get('pages',{}).get(str(page.page),{})
+        result[-1]['annotation_agent']=agent_page or None
+        result[-1]['grounding_attempts']=agent_page.get('tool_attempts',len(grounding))
+        result[-1]['tool_validation_reasons']=agent_page.get('rejection_reasons',[])
+        result[-1]['source_content_duplication']=None  # measured against native rows in A/B/C harness
+        visible=[n for n in rendered if n.sketch.lines or n.sketch.strokes or n.sketch.arrow]
+        unplaced=sum(n.sketch.placement.get('status')=='unplaced_by_layout' for n in rendered)
+        result[-1]['planned_actions']=len(rendered) if annotations.agent_report else result[-1]['planned_actions']
+        result[-1]['placed_actions']=len(rendered)-unplaced
+        result[-1]['rendered_annotations']=len(visible)
+        result[-1]['distinct_knowledge_rendered']=len({n.content_id for n in visible})
         marked=[n for n in rendered if n.sketch.strokes or n.sketch.arrow]
         result[-1]["visual_action_count"]=len(marked)
         result[-1]["no_visual_action_reason"]=None if marked or not items else (
@@ -47,7 +58,7 @@ def build_loss_audit(folder,content,annotations):
             "extraction_unavailable":sum(v.status=="unavailable" for v in validation),
             "grounding_rejected":sum(g["grounding_status"]=="rejected" for g in grounding),
             "not_selected_by_density":sum(p.get("status")=="omitted" for p in planning),
-            "unplaced_by_layout":0,"render_failed":None,
+            "unplaced_by_layout":unplaced,"render_failed":None,
         }
         result[-1]["render_state"]="layout_ready_pdf_verified_separately"
     return result

@@ -85,6 +85,7 @@ def _save_upload(upload: UploadFile, directory: Path, default_suffix: str) -> Pa
 def create_job(
     pdf: UploadFile, audio: UploadFile | None = None, stt_model: str | None = Form(None),
     visual_grounding: bool | None = Form(None),
+    annotation_mode: Literal["legacy","ai_planner","visual_agent"] | None = Form(None),
 ) -> dict[str, str]:
     _check_stt_model(stt_model)
     if Path(pdf.filename or "").suffix.lower() != ".pdf":
@@ -95,7 +96,7 @@ def create_job(
         temporary = Path(directory)
         pdf_path = _save_upload(pdf, temporary, ".pdf")
         audio_path = _save_upload(audio, temporary, ".audio") if audio else None
-        job_id = pipeline.create_job(pdf_path, audio_path, stt_model=stt_model,visual_grounding=visual_grounding)
+        job_id = pipeline.create_job(pdf_path, audio_path, stt_model=stt_model,visual_grounding=visual_grounding,annotation_mode=annotation_mode)
     _write_status(pipeline.job_dir(job_id), "queued")
     _executor.submit(_run_job, job_id)
     return {"job_id": job_id}

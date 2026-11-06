@@ -14,6 +14,8 @@ def isolated_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("EMBEDDING_PROVIDER", "mock")
     monkeypatch.setenv("VISUAL_GROUNDING", "0")
     monkeypatch.setenv("LAYOUT_ENGINE", "v1")
+    monkeypatch.setenv("ANNOTATION_MODE", "legacy")
+    monkeypatch.setenv("OVERVIEW_MODE", "extractive")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

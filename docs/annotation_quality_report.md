@@ -369,3 +369,66 @@ mock VLM tests는 lazy load, 두 페이지 순차 요청, 동일 child 재사용
 삭제하지 않고 이전 run에 보존했다. 세부 내역은 `visual_grounding.md`에 있다.
 최종 backend 408 passed, frontend 25 passed/build 통과. OCR 정확도·실강의 A/B·semantic entailment·
 PDF 필기의 최종 가독성 개선은 여전히 미측정이다. 이 작은 fixture는 prompt 개발에도 사용했다.
+
+## Annotation Intelligence v3 / Overview v3 — 2026-11-06
+
+**Experimental integration is implemented; the complete quality Definition of Done is NOT satisfied. Default remains legacy.** This section supersedes older claims about the Overview's visible metadata. The real lecture was reused; no new STT or alignment accuracy improvement is claimed.
+
+### Reproducible inputs and artifacts
+
+Start HEAD `5a3893c`, clean `main`. Read the real 11-page lecture job `05a433631737`, 37 transcript segments, approximately 4:45 audio. The same previously validated 11 Rich ContentItems were used for A/B/C. The source job is read-only; experiments copy required inputs into their own state. Exact filenames `classNote.pdf` / `classNote (1).pdf` were not found; no claim is made to have inspected those named files.
+
+Final artifacts: `data/annotation-v3-runs/comparison-02/`:
+
+- `baseline.pdf`, `ai-planner.pdf`, `visual-agent.pdf`: all 12 pages, unchanged original slide order after Overview.
+- `overview-before.pdf` / `overview-before.png`: previous phase output; `visual_agent-overview.png`: new study synthesis.
+- `{legacy,ai_planner,visual_agent}-slide{3,4,5,6}.png`, `comparison-contact.pdf`, `contact-{0..4}.png`.
+- `annotations.json`, `quality-metrics.json`, `gpu-metrics.json`, `page-mapping-tests.json`, mode-specific tool/review JSON, and isolated job state/evidence graphs.
+- `frontend/`: actual browser screenshots and `browser-report.json`. Upload/progress/error requests are intercepted; PDF/API/audio/density/style/download use the actual local backend and real copied lecture.
+
+`comparison-01/` and `overview-render-before/` preserve intermediate outputs, including a reviewer-accepted but unsupported course-context phrase and an overly repetitive overflow layout. Those are not the final recommended PDFs.
+
+### A/B/C measurements (detailed, natural ink)
+
+| Measured quantity | A legacy | B AI planner | C visual agent |
+|---|---:|---:|---:|
+| Planned annotation rows | 11 | 12 | 13 |
+| Rows with visible text/ink | 11 | 9 | 10 |
+| Direct ink/connector rows | 10 | 8 | 9 |
+| Canonical element-to-element relations | 0 | 3 | 4 |
+| Distinct source knowledge rendered / 11 | 11 | 7 | 8 |
+| Visible provenance retention | 100% | 100% | 100% |
+| Export pages | 12 | 12 | 12 |
+
+All source text was retained. Geometric original-text occlusion, annotation-box overlap, connector crossing and out-of-page counts are zero on these outputs under the existing evaluator. These metrics are **not** mathematical target accuracy or human readability. Intentional highlight contact and marks within their target figure are handled separately; raster diagram label/shaft interference is not comprehensively measured. Exact normalized native-text repetition was zero in all modes, so it proves no improvement in paraphrase redundancy.
+
+The lower distinct-knowledge retention in B/C is a regression relative to A. Detailed Notes still retain all 11 items; missing marks are observable, not silently deleted content. More relation actions do not establish overall superiority. No human gold target score, true semantic coverage, omission severity or usefulness score was measured.
+
+### Visual inspection (Codex inspection of rendered PNGs; no independent human rating)
+
+- Slide 3: core definition and final inverse are boxed; a duplicate underline on the final result is weak decoration. Repeated real/imaginary subexpressions were rejected instead of arbitrarily selecting occurrences. Desired component-to-zero relation annotations remain incomplete.
+- Slide 4: two native imaginary-term relations show opposite signs, plus the short supported note “All signs flipped”; the example is not rewritten as a long note. Real-component/cancellation coverage is incomplete. This is a visible change, not proof of correct lecture alignment.
+- Slide 5: the two colored point centers are connected using pixel-derived canonical candidates with VLM confirmation and the existing figure association. No giant circle or z/α label was fabricated over the w/γ diagram. The added connector partly follows existing vectors and can be redundant. Word underlines were suppressed by hard collision constraints. Precise axes/origin/vector semantics are not generally solved.
+- Slide 6: native `(-1)z` is highlighted, with a proof-step connector. Individual common-factor links/short notes can still fail repeated-subexpression validation. The field-generalization source remains incomplete in the validated Rich inventory; this work did not fix upstream extraction.
+- Overview: a coherent study page now contains purpose, goals, concepts, exact formulas and both numeric examples, without source counts/times/alignment metadata. Greek names in validated equation fields render as Greek symbols. Long study output prioritizes whole cards at 10.5pt, keeping the introduction and core formulas/examples. Full synthesis remains in JSON and Detailed Notes. Some optional review cards and formula explanations are compressed; field-generalization coverage remains incomplete.
+
+A model critique initially accepted an unsupported “linear algebra” introduction. Visual/source inspection found it; a separate source-domain guard and regression test now reject it, followed by a new synthesis. Model review acceptance alone is insufficient evidence of factual correctness.
+
+### Actual providers and GPU measurements
+
+Semantic plans and synthesis use the existing Gemini provider. During experiments the configured `gemini-3.6-flash` reached its daily quota, and actual later usage records show `gemini-3.1-flash-lite`. `gemini-2.5-pro` generation returned 404 (no longer available to new users); `gemini-3.1-pro-preview` returned quota exhaustion. Neither is claimed as a successful planner. No `.env` or model weights were changed to conceal this limitation.
+
+Reference `dev-01` final grouped execution: **19 actual 8B attempts = 16 schema-valid responses + 3 invalid review responses**. Of valid responses, three visual plans were incomplete and were not accepted as complete plans. Selective fallback kept the validated semantic state. `comparison-02` reused these prepared checkpoints; it made zero new VLM calls. Earlier exploratory runs are separate from this reference, not included as fresh calls in the final replay.
+
+- Qwen/Qwen3-VL-8B-Instruct revision `0c351dd01ed87e9c1b53cbc748cba10e6187ff3b`, NF4 double quantization, SDPA, batch 1, local SSD cache.
+- Peak PyTorch allocated **6.743 GiB**, reserved **6.953 GiB**, across the 16 measured valid responses. This excludes a continuously sampled whole-device/CUDA-runtime VRAM peak.
+- Mean generation latency **1.812 s**, valid responses only; model loads **9.734 / 9.647 / 9.855 s**. Failed-request timing/VRAM was not retained in the aggregate and is explicitly unmeasured.
+- OOM 0 in this reference. Actual revision edits 0; reviewers returned accept for valid reviews. Selective remove/retarget/rollback and the two-round bound are tested with deterministic mocks, not proven effective by this real lecture.
+- Schema/input-budget failures occurred during development and were retained as fallbacks. Input payloads were reduced to page-specific candidate IDs, one copy of evidence per knowledge, and small request groups; no source evidence is truncated to fit.
+- Worker closed after experiments; an observed post-run `nvidia-smi` returned 10MiB / 0% (desktop process). Model download 0. Financial cost unknown; token usage is recorded rather than inventing a price.
+
+### Regression and limitations
+
+Final backend **509 passed**, frontend **31 passed**, production build passed (existing large-chunk warning). Additional Chromium: **6 scenarios passed**, page errors0; see the final browser report. Existing page/audio seek and Overview offset rules remain intact. Source/audio hashes and 12-page mapping checks passed; this does not establish real alignment accuracy. PyAV **18.1.0** + faster-whisper **1.2.1** decoded the existing WAV fixture to 560,000 samples; no dependency sync/lock rewrite was performed.
+
+High-priority remaining work: restore B/C distinct-knowledge retention without loosening validation; disambiguate explicit math derivation roles; improve strict visual JSON/completeness; make reviewer corrections effective on known faults; reduce redundant graph/mark decoration; evaluate field-generalization and true source coverage with human gold. A read-only balanced annotation render measured about 7 seconds locally (profiling identifies connector routing); rendering performance remains a product limitation.

@@ -236,6 +236,46 @@ def layout_page_v2(notes,page,font_name="pretendard",style="natural",max_route_n
     placed=[]; previous=[]; sketches=[];band_y=h+pad
     for note in notes:
         target=_target(note,w,h)
+        if note.agent_action and not note.text:
+            mark_occupied=[r for r in occupied if not (note.target_kind=='figure_part' and r.contains(target))]
+            mark,strokes,anchor,reason=make_mark(note,w,h,style,mark_occupied)
+            arrow=[];route_reason='not_applicable'
+            if note.agent_action['tool']=='connect':
+                mark='none';strokes=[]
+                if len(note.blocks)==2:
+                    first,last=[rect(b.bbox,w,h) for b in note.blocks]
+                    def endpoints(area):return [(area.x0-4,(area.y0+area.y1)/2),(area.x1+4,(area.y0+area.y1)/2),((area.x0+area.x1)/2,area.y0-4),((area.x0+area.x1)/2,area.y1+4)]
+                    preferred=(note.agent_action or {}).get('placement','near_target')
+                    destinations=endpoints(last)
+                    preferred_index={'left':0,'right':1,'above':2,'below':3}.get(preferred)
+                    pairs=sorted((math.dist(a,b)-(w*.2 if preferred_index is not None and b==destinations[preferred_index] else 0),a,b) for a in endpoints(first) for b in destinations)
+                    for _,start,end in pairs:
+                        if not all(2<=x<=w-2 and 2<=y<=h-2 for x,y in (start,end)):continue
+                        relation_obstacles=[r for r in occupied if not (note.target_kind=='figure_part' and r.contains(first) and r.contains(last))]+placed
+                        shaft,route_reason=route(start,end,relation_obstacles,previous,(2,2,w-2,h-2),step=max(8,w/90),max_nodes=max_route_nodes)
+                        if shaft:
+                            arrow=[shaft];previous.append(shaft)
+                            angle=math.atan2(shaft[-1][1]-shaft[-2][1],shaft[-1][0]-shaft[-2][0])
+                            head=[(end[0]-4*math.cos(angle-.45),end[1]-4*math.sin(angle-.45)),end,(end[0]-4*math.cos(angle+.45),end[1]-4*math.sin(angle+.45))]
+                            if safe_path(head,relation_obstacles,.7):arrow.append(head)
+                            break
+                reason='native_element_relation' if arrow else 'relation_route_unavailable'
+            pen=max(3,min(16,target.height*.65)) if mark=='highlight' else 1.3
+            grid=page.background_luma
+            dark=False
+            if grid:
+                gy=min(len(grid)-1,max(0,int((target.y0+target.y1)/2/h*len(grid))))
+                gx=min(len(grid[gy])-1,max(0,int((target.x0+target.x1)/2/w*len(grid[gy]))))
+                dark=grid[gy][gx]<.35
+            color=[1.,.88,.42] if dark else [.11,.30,.65]
+            placement={'engine':VERSION,'status':'placed' if strokes or arrow else 'unplaced_by_layout',
+                       'reason':'native_mark_only','mark_reason':reason,'connector_reason':route_reason,
+                       'figure_part':note.target_kind=='figure_part','text_box':None,'target_bbox':list(anchor) if anchor is not None else None,
+                       'anchor':list(anchor) if anchor is not None else None,'connector_control_points':arrow[0] if arrow else [],'fallback_mode':None}
+            sketches.append(Sketch(mark=mark,strokes=strokes,arrow=arrow,side='right',x=0,y=0,width=0,height=0,
+                font_size=font,line_height=line_height,lines=[],stroke_width=pen,stroke_opacity=.24 if mark=='highlight' else 1.,
+                text_color=color,mark_color=color,placement=placement))
+            continue
         fonts=[fallback_font() if fallback else load_note_font(font_name) for _,fallback in text_runs(note.text,font_name)] or [load_note_font(font_name)]
         ascent=max(f.ascender for f in fonts);descent=max(0.,-min(f.descender for f in fonts))
         baseline=max(font,ascent*font)
@@ -250,7 +290,8 @@ def layout_page_v2(notes,page,font_name="pretendard",style="natural",max_route_n
                                (target.x0+target.width/2,target.y0+target.height/2))
             # Hard tier: use a safe original-slide candidate before ANY margin.
             internal=box.x0>=0 and box.x1<=w
-            score=distance+box.height*.2
+            preference=(note.agent_action or {}).get("placement","near_target")
+            score=distance+box.height*.2-(w*.12 if name==preference else 0)
             options.append((0 if internal else 1,score,name,box))
         if options:
             _,_,name,box=min(options,key=lambda value:(value[0],value[1],value[2],tuple(value[3])))
@@ -331,10 +372,10 @@ def evaluate(sketches,page,gutter=None,output_height=None):
         target=s.placement.get("target_bbox")
         return s.mark=="highlight" and s.stroke_opacity<=.3 and target is not None and expanded(pymupdf.Rect(target),.1).contains(r)
     captions=[word for word in words if any(f.y1-h*.05<=word.y0<=f.y1+h*.08 and word.x1>=f.x0 and word.x0<=f.x1 for f in figures)]
-    return {"annotations":len(sketches),"annotation_placement_rate":1. if sketches else None,
+    return {"annotations":len(sketches),"annotation_placement_rate":sum(bool(s.lines or s.strokes or s.arrow) for s in sketches)/len(sketches) if sketches else None,
             "original_text_occlusion_area":sum((b&r).get_area() for b in boxes for r in words if intersects(b,r)),
             "formula_figure_occlusion_count":sum(any(segment_hits(a,b,f,radius) for a,b in zip(p,p[1:]))
-                                                   for s,p,radius,connector in ink for f in figures),
+                                                   for s,p,radius,connector in ink for f in figures if not s.placement.get("figure_part")),
             "annotation_box_overlap_count":overlap,"connector_intersection_count":crossings,
             "ink_text_interference_count":sum(any(segment_hits(a,b,r,radius) for a,b in zip(p,p[1:]))
                                                 for s,p,radius,connector in ink for r in words if connector or not intended_highlight(s,r)),

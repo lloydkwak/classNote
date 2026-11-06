@@ -11,6 +11,8 @@ DUPLICATE_SIMILARITY = 0.7
 
 
 def _is_duplicate(first: Note, second: Note) -> bool:
+    if first.agent_action or second.agent_action:
+        return bool(first.provenance and second.provenance and first.provenance.action_id==second.provenance.action_id)
     if (first.provenance or second.provenance) and first.content_id != second.content_id:
         return False
     if first.page != second.page or set(first.block_ids) != set(second.block_ids):
@@ -63,6 +65,7 @@ def consolidate(
                     mark=note.target_mark if layout_engine=="v2" or note.target_mark in {None,"underline","circle","bracket","none"} else "underline",
                     target_kind=note.provenance.target_kind if note.provenance else None,
                     rotation=page.rotation,
+                    agent_action=note.agent_action,
                 )
                 for note_id, note in zip(ids, chosen)
             ]
@@ -96,6 +99,7 @@ def consolidate(
                         sketch=sketch,
                         provenance=note.provenance,
                         action_reason=note.action_reason,
+                        agent_action=note.agent_action,
                     )
                     for note_id, note, sketch in zip(ids, chosen, sketches)
                 ],

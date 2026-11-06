@@ -28,6 +28,8 @@ class AnnotationAction(BaseModel):
     timestamp_range: tuple[float,float]
     page: int
     target_element_id: str | None
+    target_element_ids: list[str] = []
+    tool: str | None = None
     target_kind: str | None
     grounding_status: str
     annotation_type: VisualMark

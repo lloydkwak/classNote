@@ -340,7 +340,17 @@ def save_graph(folder,content,segments,alignment,actions,manifest,annotations,de
                  {"source_segment_id":index,**segment.model_dump(mode="json")})
         segment_nodes[index]=sid
         edge(audio_id,sid,"transcribed_as")
-    rendered={note.content_id:(page,note) for page in annotations.pages for note in page.notes}
+    rendered={note.provenance.action_id:(page,note) for page in annotations.pages for note in page.notes
+              if note.provenance and (note.sketch.lines or note.sketch.strokes or note.sketch.arrow)}
+    rendered_knowledge={note.content_id for page,note in rendered.values()}
+    # Knowledge intentionally left unmarked remains connected to speech and overview.
+    for item in content.items:
+        if any(a.knowledge_id==item.id for a in actions):continue
+        kid=node("knowledge",stable_id("knowledge",folder.name,item.model_dump(mode="json")),item.model_dump(mode="json"))
+        for index in item.segment_ids:
+            if index not in segment_nodes:raise ValueError("invalid graph segment reference")
+            edge(segment_nodes[index],kid,"supports")
+        if overview_id and item.id in annotations.overview["validated_knowledge_ids"]:edge(kid,overview_id,"summarized_in")
     for action in actions:
         item=next(i for i in content.items if i.id==action.knowledge_id)
         kid=node("knowledge",action.evidence_id,{"knowledge_id":item.id,**item.model_dump(mode="json")})
@@ -353,28 +363,30 @@ def save_graph(folder,content,segments,alignment,actions,manifest,annotations,de
         windows=[w.model_dump(mode="json") for w in alignment.windows if w.start<item.end and w.end>item.start]
         alignment_id=node("page_alignment",stable_id("alignment",item.page,windows),{"page":item.page,"windows":windows})
         edge(alignment_id,kid,"assigned_to_page")
-        record=manifest["records"].get(item.id,{})
+        record=manifest.get("action_records",{}).get(action.action_id,manifest["records"].get(item.id,{}))
         did=node("grounding_decision",action.provenance.decision_id,
                  {"status":action.grounding_status,"reason":action.provenance.fallback_reason or record.get("decision",{}).get("reason",action.reason),
                   "request_fingerprint":fingerprint(record.get("request",{})),
-                  "model":MODEL_ID,"revision":MODEL_REVISION,"inference_revision":manifest["sources"]["inference"]})
+                  "model":record.get("provider_model",MODEL_ID),"revision":MODEL_REVISION,"inference_revision":manifest["sources"]["inference"]})
         edge(kid,did,"grounding_requested")
-        if action.target_element_id:
-            eid=node("slide_element",stable_id("element",action.registry_fingerprint,action.target_element_id),
-                     {"canonical_id":action.target_element_id,"registry_fingerprint":action.registry_fingerprint,
+        for target_id in action.target_element_ids or ([action.target_element_id] if action.target_element_id else []):
+            target=next((t for t in record.get("targets",[]) if t["element_id"]==target_id),None)
+            eid=node("slide_element",stable_id("element",action.registry_fingerprint,target_id),
+                     {"canonical_id":target_id,"registry_fingerprint":action.registry_fingerprint,
                       "pdf_sha256":manifest["sources"]["input.pdf"],"page":item.page,
-                      "bbox":record["decision"]["bbox"]})
+                      "bbox":target["bbox"] if target else record["decision"]["bbox"]})
             edge(did,eid,"validated_target")
         aid=node("annotation_action",action.action_id,action.model_dump(mode="json"))
         edge(did,aid,"planned_as")
-        if item.id in rendered:
-            page,note=rendered[item.id]
+        if action.action_id in rendered:
+            page,note=rendered[action.action_id]
             rid=node("rendered_annotation",stable_id("render",action.action_id,note.sketch.model_dump(mode="json")),
                      {"annotation_id":note.id,"pdf_page":page.page+1,"source_page":page.page,
                       "source_slide_index":page.page-1,"export_page_index":page.page,"density":density,
                       "sketch_sha256":fingerprint(note.sketch.model_dump(mode="json")),"export":export})
             edge(aid,rid,"rendered_as")
-    counts=Counter(a.grounding_status for a in actions)
+    counts=Counter(r['decision']['status'] for r in manifest['records'].values()) if 'action_records' in manifest else Counter(a.grounding_status for a in actions)
+    edges=list({(e.source,e.target,e.relation):e for e in edges}.values())
     rejected_count=sum(v.status=="rejected" for v in content.validation)
     observed=len(content.items)+rejected_count
     denominator_complete=not any(v.status=="unavailable" for v in content.validation)
@@ -384,8 +396,8 @@ def save_graph(folder,content,segments,alignment,actions,manifest,annotations,de
              "evidence_candidate_denominator_complete":denominator_complete,
              "grounding_status_counts":dict(counts),"grounding_attempted":manifest.get("telemetry",{}).get("provider_requests",0),
              "actions_generated":len(actions),"actions_selected":sum(a.selected for a in actions),
-             "annotations_rendered":len(rendered),"distinct_knowledge_rendered":len(rendered),
-             "extracted_item_render_retention":len(rendered)/len(content.items) if content.items else None,
+             "annotations_rendered":len(rendered),"distinct_knowledge_rendered":len(rendered_knowledge),
+             "extracted_item_render_retention":len(rendered_knowledge)/len(content.items) if content.items else None,
              "lecture_semantic_coverage":None,"human_target_accuracy":None,
              "fallback_reasons":dict(Counter(a.provenance.fallback_reason for a in actions if a.provenance.fallback_reason)),
              "telemetry":manifest.get("telemetry",{})}

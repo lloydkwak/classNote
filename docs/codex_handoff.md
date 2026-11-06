@@ -1,3 +1,112 @@
+# Codex handoff — Annotation Intelligence v3 / Overview v3 (2026-11-06)
+
+## Latest state — this section supersedes the historical sections below
+
+User asked for real v3 code, not another design report. Work started from clean `5a3893c` on main.
+After implementation the user requested a local commit. Push remains user-managed. Existing `.env`, original job data,
+models, backend/VLM environments and lockfiles were preserved. No model downloads or package installs.
+
+**Optional production integration exists; full v3 quality DoD is NOT complete. Keep legacy default.**
+A/B/C comparison shows improved element relations but lower distinct knowledge retention than baseline.
+Do not claim general human-level notes, real reviewer correction effectiveness, or fixed alignment.
+
+### Implemented
+
+- `backend/app/annotation_agent/{schema,prompts,planning,tools,rendering,pipeline}.py`: strict semantic
+  intents, multiple actions per knowledge, novelty guard, capability-scoped writes/read/preview/export,
+  source/registry/evidence validation, idempotency, atomic replacement, actual SoM visual plan,
+  actual rendered-PDF review, bounded selective revisions/rollback, isolated worker use, checkpoints.
+- `grounding/math_elements.py`: native glyph/group/term/side/product geometry, prose barriers,
+  stable IDs. `figure_elements.py`: specialized colored-point/axis-intersection pixel candidates,
+  not general figure recognition. Visual/evidence confirmation required for figure parts.
+- Existing GPU provider/runtime/JSONL IPC accept `agent_plan`/`agent_review`. Canonicalize image paths
+  before subprocess transmission. Preserve local SSD NF4/SDPA/batch1/lease/OOM/timeout lifecycle.
+- `run.py`, `models.py`, `evidence.py`, `grounded_notes.py`, `consolidate.py`, `layout_v2.py`,
+  `loss_audit.py`: production notes/action/layout/export integration; action-level graph mapping,
+  multiple targets and source IDs, mark-only annotations, explicit failure/unplaced counts.
+- `pipeline/overview_synthesis.py`: whole-lecture sources + bounded cited map/reduce, native formula /
+  numeric/citation checks, separate model entailment critique, bounded repair, explicit optional
+  unsupported-claim removal, source-domain guard (found reviewer-accepted untaught course context).
+- `overview.py`: student study page without processing metadata, Unicode formulas, source/export
+  page contract retained, readable minimum10.5pt, whole-card compression with full JSON retained.
+- API/CLI/config/.env.example: `annotation_mode=legacy|ai_planner|visual_agent`, legacy default;
+  `OVERVIEW_MODE=synthesis` default. Saved old jobs without a mode stay legacy.
+- Frontend: advanced experimental mode selector, study Overview panel, action-specific React keys,
+  mark-only source labels, decorative thumbnail children cannot swallow navigation clicks.
+  Existing design, source page/audio navigation, density/style/download retained.
+- `backend/scripts/verify_annotation_v3.py`: copied-source A/B/C production export harness.
+  `frontend/scripts/browser-v3.mjs`: actual Chromium/API/audio/PDF regression with explicitly mocked
+  upload/progress/error requests (no paid calls from browser).
+
+### Actual artifacts / tests
+
+Final inspected: `data/annotation-v3-runs/comparison-02/` with baseline.pdf, ai-planner.pdf,
+visual-agent.pdf, Overview before/after PNGs, slides3/4/5/6 PNGs, contact PDF/PNGs, annotations,
+quality/GPU/page-mapping JSON, mode-specific tool/review files and frontend screenshots/report.
+The final study layout was re-exported through production export after visual inspection;
+`export-integrity.json` verifies each final PDF SHA against its mode-specific evidence graph,
+and the original source audio was copied into experiment state so recording nodes are available;
+`overview-render-before/` retains earlier repeated-heading/overflow drafts. Original source job is
+`05a433631737`; same11 validated items/37 segments/11 source pages used for all modes, N+1=12 exports.
+
+- Final backend509 passed / frontend31 passed / build passed (chunk-size advisory remains).
+- Chromium6 scenarios passed, page errors0; 375/768/1280/1440 screenshots. Initial mobile click
+  failure reproduced in the full workflow; disabling pointer events on decorative thumbnail children
+  then passed the complete workflow. Do not describe this as testing every mobile browser.
+- API→multiple action IDs→evidence graph→PDF and density/style no-inference tested.
+- PyAV18.1.0 / faster-whisper1.2.1: existing WAV decoded560000 samples. Do not `uv sync` away this fix.
+- Real reference dev-01 final run:19 Qwen8B attempts,16 schema-valid responses,3 invalid review responses,
+  OOM0. Three schema-valid visual plans were incomplete. Valid generation mean1.812s,
+  peak allocated6.743GiB/reserved6.953GiB; model loads9.734/9.647/9.855s. Failed-call latency/full-device
+  peak not retained. comparison-02 replayed prepared states with zero new VLM calls.
+- Actual reviewer revisions0. Removal/retarget/rollback/loop bound are mock-tested; real correction
+  effectiveness is unproven. Gemini3.6 quota exhausted during development, later calls actually used
+  3.1-flash-lite. 2.5-pro returned404; 3.1-pro-preview quota exhausted. No success claim for those.
+
+### Known unresolved quality failures
+
+A/B/C visible rows11/9/10, distinct knowledge11/7/8, canonical relations0/3/4. All11 Detailed Notes
+remain. C has no actual rendered circle in this lecture; circle/bracket/check capabilities are not
+proof they were useful here. Repeated component targets rejected; some marks are unplaced due to
+collisions. Figure connector partly repeats existing vectors. Duplicate final-result mark remains.
+Overview is now a real study guide but field-generalization coverage is incomplete; optional formula
+explanations/review cards may be compressed. Alignment is unchanged/uncertain on source3 and6.
+Balanced annotations render about7s locally; routing is the dominant profiler hotspot.
+
+### Reproduction / active review services
+
+```bash
+cd /root/classNote
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/verify_annotation_v3.py \
+  --job data/slide-first-runs/real-reviewed/state/jobs/05a433631737 \
+  --output data/annotation-v3-runs/new-id --prepare --gpu
+cd backend
+FFMPEG_PATH=/usr/bin/ffmpeg .venv/bin/python -m pytest -q
+cd ../frontend
+PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH npm test
+PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH npm run build
+```
+
+Review servers started by this task: backend127.0.0.1:8015 (comparison-02/state), frontend127.0.0.1:5181.
+Browser entry `http://127.0.0.1:5181/#/jobs/05a433631737`; SSH-forward these ports if remote.
+Production startup commands / mode selection are in README. Do not rerun model downloads.
+
+### Next priorities
+
+1. Improve validated math-role disambiguation and knowledge-to-render retention without overriding
+   ambiguous/rejected targets or rerunning STT/alignment to mask planning failures.
+2. Strict visual schema/completeness repair and calibrated reviewer fault corpus; retain failed-call
+   timing/VRAM as well as successful response measurements.
+3. Reduce redundant same-target marks / duplicated graph vectors, route performance, suppressed
+   symbol/word marks, and conservative fallback for scanned/complex math.
+4. Human gold for lecture alignment, mathematical targets, field-generalization coverage and actual
+   usefulness. Do not promote visual_agent default until measured A/B/C quality supports it.
+
+See annotation_agent_v3.md, lecture_overview_v3.md, annotation_v3_technology_decisions.md,
+lecture_annotation_policy.md and annotation_quality_report.md for contracts/evidence/limitations.
+
+---
+
 # Codex handoff — 2026-11-06
 
 ## 최신 긴급 후속 인수 — Slide-first + Lecture Overview (2026-11-06)

@@ -217,7 +217,10 @@ def test_long_lecture_overview_is_one_page_with_explicit_compression(tmp_path):
     with pymupdf.open() as doc:
         page=draw_overview(doc,overview)
         assert len(doc)==1
-        assert '07' in page.get_text()
+        # v3 replaces page-number inventories with a study page. Compression
+        # remains explicit internally; no processing counts leak into the PDF.
+        assert overview['presentation']['compressed_knowledge_ids']
+        assert 'Validated knowledge' not in page.get_text().replace('\xa0',' ')
         assert all(pymupdf.Rect(word[:4]).y1<=842 for word in page.get_text('words'))
 
 

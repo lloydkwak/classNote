@@ -166,6 +166,7 @@ class AnnotationProvenance(BaseModel):
 
 
 class Note(BaseModel):
+    agent_action: dict | None = None
     content_id: str | None = None
     page: int
     block_ids: list[str]  # Empty means a page-level note.
@@ -211,6 +212,7 @@ class Sketch(BaseModel):
 
 
 class Annotation(BaseModel):
+    agent_action: dict | None = None
     action_reason: str = ""
     content_id: str | None = None
     id: str
@@ -237,6 +239,7 @@ class PageAnnotations(BaseModel):
 
 
 class Annotations(BaseModel):
+    agent_report: dict | None = None
     overview: dict | None = None
     page_mapping: list[dict] = []
     layout_engine: str = "v1"

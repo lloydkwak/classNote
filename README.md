@@ -80,3 +80,36 @@ FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/verify_slid
 
 The verifier copies the original job and revalidates saved semantic candidates. It does not claim
 new STT or alignment accuracy. Actual PDF/PNG/JSON results are under ignored `data/`.
+
+### Annotation Intelligence v3 (experimental)
+
+The default annotation mode remains `legacy`. New uploads can choose an experimental
+learning-point planner or visual review in **필기 설정 → 필기 방식**. The existing provider
+supplies semantic plans and whole-lecture study synthesis; Qwen3-VL 8B NF4 supplies
+optional visual selection/review. The server records provider/quota/schema failures
+and retains validated fallback results. See [v3 architecture](docs/annotation_agent_v3.md),
+[Overview synthesis](docs/lecture_overview_v3.md) and [quality limitations](docs/annotation_quality_report.md).
+
+```bash
+# Existing environments/cache only; do not uv sync or download the model again.
+cd /root/classNote
+FFMPEG_PATH=/usr/bin/ffmpeg ANNOTATION_MODE=visual_agent \
+  backend/.venv/bin/python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000
+
+# In another shell (existing Node 22 path on this server):
+cd /root/classNote/frontend
+API_TARGET=http://127.0.0.1:8000 PATH=/root/classNote/.cache/node/node_modules/node/bin:$PATH \
+  npm run dev -- --host 0.0.0.0 --port 5173
+```
+
+Open `http://<server>:5173`, or forward localhost ports over SSH. For a stored job,
+its saved `annotation_mode` is authoritative; changing the environment does not
+silently switch older jobs. `OVERVIEW_MODE=synthesis` prepares a cited study guide
+during notes generation. Exports/density/style changes never call an LLM/VLM.
+Use a new directory for reproducible A/B/C artifacts:
+
+```bash
+FFMPEG_PATH=/usr/bin/ffmpeg backend/.venv/bin/python backend/scripts/verify_annotation_v3.py \
+  --job data/slide-first-runs/real-reviewed/state/jobs/05a433631737 \
+  --output data/annotation-v3-runs/my-comparison --prepare --gpu
+```

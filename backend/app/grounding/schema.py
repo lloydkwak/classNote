@@ -19,7 +19,7 @@ class StrictModel(BaseModel):
 class Element(StrictModel):
     id: str = Field(min_length=1)
     page: int = Field(ge=1)
-    kind: Literal["word", "symbol", "line", "formula", "figure", "block"]
+    kind: Literal["word", "symbol", "line", "formula", "figure", "block", "figure_part"]
     bbox: Box  # normalized unrotated crop-local PyMuPDF coordinates
     text: str
     source: Literal["pdf", "ocr"]

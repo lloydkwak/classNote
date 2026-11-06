@@ -30,7 +30,7 @@ const toPoints = (stroke: [number, number][]) => stroke.map(([x, y]) => `${x},${
 
 /** Stays the same when notes are added and renumbered, so drawn notes stay on screen. */
 export function noteKey(note: Annotation) {
-  return `${note.start}:${note.note}`
+  return note.provenance?.action_id??`${note.start}:${note.note||note.action_reason||'강의 요소 강조'}:${note.agent_action?.target_ids.join(',')??''}`
 }
 
 // Seconds for each part of a note being written.
@@ -120,7 +120,7 @@ export function SlideSheet(props: {
                     width: `${(x1 - x0) * 100}%`,
                     height: `${(y1 - y0) * 100}%`,
                   }}
-                  aria-label={`${TYPE_LABELS[note.type]}: ${note.note}`}
+                  aria-label={`${TYPE_LABELS[note.type]}: ${note.note||note.action_reason||'강의 요소 강조'}`}
                   onClick={() => onPlayNote(note)}
                 />
               )),
@@ -210,7 +210,7 @@ export function SlideSheet(props: {
             })}
           </svg>
         )}
-        {onPlayNote&&notes.map(note=><button key={note.id} className="note-access" aria-label={`필기 재생: ${note.note}`}
+        {onPlayNote&&notes.map(note=><button key={note.id} className="note-access" aria-label={`필기 재생: ${note.note||note.action_reason||'강의 요소 강조'}`}
           style={{left:`${(note.sketch.x+gutter)/totalWidth*100}%`,top:`${note.sketch.y/totalHeight*100}%`,width:`${note.sketch.width/totalWidth*100}%`,height:`${note.sketch.height/totalHeight*100}%`}}
           onClick={()=>onPlayNote(note)}/>)}
       </div>

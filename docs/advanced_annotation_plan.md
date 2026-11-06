@@ -1,5 +1,24 @@
 # Advanced annotation — Phase A/B, 2026-11-06
 
+## Annotation Intelligence v3 / Overview v3 — 진행 계획 (2026-11-06)
+
+시작 HEAD `5a3893c`, clean main. GPU3080 10GB/driver550.163.01/여유53GiB 확인.
+기존 real-reviewed 산출물과 원본05a job을 재사용하며 새 모델/venv/의존성 설치는 하지 않는다.
+기존 Overview는 short_note의 페이지별 결합이고 choose_action은 item당1개이므로,
+whole-lecture synthesis와 여러 typed action을 갖는 독립 experimental 경로가 필요하다.
+
+1. 기존 provider 기반 semantic planner, 원문 중복/숫자/공식/evidence 검증, native math subelement graph.
+2. 내부 Annotation Tool API: allowlisted tools, ID/provenance/hash 검증, action store/idempotency/rollback.
+3. 기존 isolated8B worker에 visual plan/review 작업을 추가. 한 이미지/batch1/lease/OOM 복구 재사용.
+4. production notes→actions→layout/export 연결, multiple actions/knowledge graph 보존,
+   legacy/ai_planner/visual_agent 선택 및 실패 fallback, density/style의 불필요한 재추론 방지.
+5. 전체 강의 synthesis Overview와 metadata 없는 학습용 첫 페이지, 기존 source/export/audio mapping 유지.
+6. 동일 saved transcript/alignment/knowledge의 A/B/C PDF, 실제 LLM/8B와 mock 구분,
+   exported word collision 및 이미지 직접 검토, 회귀/문서/한계 기록.
+
+아직 위 단계의 구현/검증은 완료되지 않았다. 자세한 상태는 codex_handoff 최상단을 갱신한다.
+
+
 ## 긴급 후속: Slide-first + Lecture Overview (구현/검증 완료 범위)
 
 시작 `148e246` clean. 지정된 `classNote.pdf`, `classNote (1).pdf` 이름은 repo 전체 PDF 검색에서
@@ -215,3 +234,22 @@ Phase D의 선택적 production 연결·합성 end-to-end/GPU 검증은 완료�
 실강의 STT/추출/grounding 정확도와 인간 품질 평가까지 완료했다고 주장하지 않는다.
 Phase E: connector 교차·figure circle/caption 간섭, free-space/overflow를 우선 개선.
 Phase F: 동의된 실제 강의 입력·사람 gold 확보 후 동일 입력 A/B 및 coverage/정확도 측정.
+
+
+## v3 integration checkpoint — 2026-11-06
+
+Optional production modes legacy/ai_planner/visual_agent, capability tool API, native math parts,
+page-scoped VLM plan/review and multi-action evidence/export are implemented. Whole-lecture study
+synthesis replaces diagnostic Overview text. Defaults remain legacy until actual quality warrants
+promotion. See `annotation_agent_v3.md` and `lecture_overview_v3.md`.
+
+Actual same-input real-lecture A/B/C PDFs and source mapping tests are in
+`data/annotation-v3-runs/comparison-02/`. Final backend509/frontend31/build passed, Chromium6
+scenarios passed. Real8B reference19 attempts/16 schema-valid, OOM0; final replay itself made no
+new model calls. Actual reviewer correction effectiveness remains unverified (zero edits).
+
+**Full quality DoD not complete:** C distinct rendered knowledge8/11 versus baseline11/11,
+ambiguous component relations still rejected, suppressed marks and redundant diagram connector,
+incomplete field-generalization coverage, unchanged uncertain alignment. Detailed Notes retain all11.
+Human gold and true semantic coverage are not available. Keep these gaps visible; do not replace
+validation with guessed coordinates or count more actions as quality improvement.

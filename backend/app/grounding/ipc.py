@@ -117,9 +117,18 @@ class IsolatedVLMProvider:
                 written=os.write(self.process.stdin.fileno(),view)
                 view=view[written:]
 
-    def select_targets(self, request, *, use_cache=True):
-        inside(request.image_path, self.root)
-        message = json.dumps({"op":"select_targets", "request":request.model_dump(mode="json"),
+    def select_targets(self,request,*,use_cache=True):
+        return self._call(request,'select_targets',use_cache=use_cache)
+
+    def agent(self,request,*,use_cache=True):
+        from app.annotation_agent.schema import VisionRequest
+        request=VisionRequest.model_validate(request)
+        return self._call(request,request.operation,use_cache=use_cache)
+
+    def _call(self, request,operation, *, use_cache=True):
+        canonical=inside(request.image_path, self.root)
+        request=request.model_copy(update={"image_path":canonical})
+        message = json.dumps({"op":operation, "request":request.model_dump(mode="json"),
                               "use_cache":use_cache}, ensure_ascii=False).encode() + b"\n"
         if len(message) > MAX_MESSAGE:
             raise WorkerFailure("worker_request_too_large")

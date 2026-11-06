@@ -18,3 +18,5 @@ html{scroll-behavior:smooth}body{background:var(--bg)}button,a,input,select,summ
 .overview-topics h4{margin:0 0 10px;line-height:1.55;font-size:14px}
 .overview-topics p{color:var(--muted);font-size:13px;line-height:1.8}
 .overview-topics button{margin:5px 8px 0 0;font-size:12px}
+/* Thumbnails are a single navigation control; PDF preview children are decorative. */
+.thumbnail > * { pointer-events: none; }

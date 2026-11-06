@@ -33,6 +33,8 @@ export interface Annotation {
     fallback_reason: string | null
     registry_fingerprint: string
   } | null
+  agent_action?: {tool:string;placement:string;revision:number;target_ids:string[];novelty:string}
+  action_reason?:string
   content_id?: string | null
   id: string
   block_ids: string[]
@@ -56,9 +58,13 @@ export interface PageAnnotations {
   notes: Annotation[]
 }
 
+export type AnnotationMode = 'legacy'|'ai_planner'|'visual_agent'
+export interface StudyPoint {title?:string;text:string;citations:{source_id:string;quote:string}[]}
+export interface StudyGuide {title:string;introduction:StudyPoint;objectives:StudyPoint[];concepts:StudyPoint[];formulas:{expression:string;meaning:string}[];examples:{title:string;given:string;result:string;explanation:string}[];connections:StudyPoint[];review_points:StudyPoint[]}
+
 export interface Annotations {
   overview?: {
-    title: string;status: string;validated_knowledge_ids:string[]
+    title: string;status: string;validated_knowledge_ids:string[];study?:StudyGuide;synthesis_status?:string
     entries: {source_page:number;source_slide_index:number;export_page_index:number;title:string;text:string;start:number;end:number;audio_verified:boolean;knowledge_ids:string[]}[]
   } | null
   page_mapping?: {kind:'overview'|'slide';source_slide_index:number|null;source_page:number|null;export_page_index:number}[]
@@ -191,9 +197,10 @@ function jobForm(pdf: File, speechModel: string) {
   return form
 }
 
-export async function createJob(pdf: File, audio: File, speechModel = '',options: {visualGrounding?:boolean;onProgress?:(percent:number)=>void} = {}): Promise<string> {
+export async function createJob(pdf: File, audio: File, speechModel = '',options: {annotationMode?:AnnotationMode;visualGrounding?:boolean;onProgress?:(percent:number)=>void} = {}): Promise<string> {
   const form = jobForm(pdf, speechModel)
   form.append('audio', audio)
+  if(options.annotationMode)form.append('annotation_mode',options.annotationMode)
   if(options.visualGrounding!==undefined)form.append('visual_grounding',String(options.visualGrounding))
   if(!options.onProgress)return (await postForm('/api/jobs', form)).job_id
   return new Promise((resolve,reject)=>{

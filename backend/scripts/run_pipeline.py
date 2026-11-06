@@ -44,17 +44,19 @@ def main() -> int:
     parser.add_argument("--from-step", choices=STEP_NAMES)
     parser.add_argument("--to-step", choices=STEP_NAMES)
     parser.add_argument("--visual-grounding",action=argparse.BooleanOptionalAction,default=None)
+    parser.add_argument("--annotation-mode",choices=["legacy","ai_planner","visual_agent"])
     args = parser.parse_args()
 
     if args.pdf:
-        job_id = create_job(args.pdf, args.audio, args.job_id,visual_grounding=args.visual_grounding)
+        job_id = create_job(args.pdf, args.audio, args.job_id,visual_grounding=args.visual_grounding,annotation_mode=args.annotation_mode)
     elif args.job_id:
         job_id = args.job_id
-        if args.visual_grounding is not None:
+        if args.visual_grounding is not None or args.annotation_mode is not None:
             import json
             path=job_dir(job_id)/"job.json"
             options=json.loads(path.read_text()) if path.exists() else {}
-            options["visual_grounding"]=args.visual_grounding
+            if args.visual_grounding is not None:options["visual_grounding"]=args.visual_grounding
+            if args.annotation_mode is not None:options["annotation_mode"]=args.annotation_mode
             path.write_text(json.dumps(options),encoding="utf-8")
     else:
         parser.error("Pass --pdf for a new job, or --job-id to resume one.")

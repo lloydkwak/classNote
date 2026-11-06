@@ -54,6 +54,7 @@ class LayoutNote:
     mark: str | None = None
     target_kind: str | None = None
     rotation: int = 0
+    agent_action: dict | None = None
 
 
 def note_font_path(name: str) -> Path:

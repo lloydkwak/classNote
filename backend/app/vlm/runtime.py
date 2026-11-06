@@ -65,6 +65,12 @@ class QwenRuntime:
 
         return self._generate(request, selection_prompt(request), TargetSelections, "selection", reduced)
 
+    def agent(self,request,reduced=False):
+        from app.annotation_agent.schema import VisualPlan,Review
+        from app.annotation_agent.prompts import vision_prompt
+        schema=VisualPlan if request.operation=='agent_plan' else Review
+        return self._generate(request,vision_prompt(request),schema,request.operation,reduced)
+
     def _generate(self, request, prompt, output_schema, result_field, reduced=False):
         import torch
         from PIL import Image
@@ -88,6 +94,8 @@ class QwenRuntime:
             from app.grounding.selection import SELECTION_SYSTEM
 
             messages.insert(0, {"role":"system", "content":[{"type":"text", "text": SELECTION_SYSTEM}]})
+        if result_field in {'agent_plan','agent_review'}:
+            messages.insert(0,{'role':'system','content':[{'type':'text','text':'You are a strict JSON API. Return exactly one valid JSON object, no Markdown. Use only supplied action and element IDs. Never output coordinates or invoke external tools.'}]})
         inputs = self.processor.apply_chat_template(
             messages, tokenize=True, add_generation_prompt=True,
             return_dict=True, return_tensors="pt",
@@ -155,7 +163,9 @@ def worker_main(connection, config, factory):
             try:
                 from app.grounding.schema import TargetRequest
 
-                value = runtime.select_targets(request, reduced) if isinstance(request, TargetRequest) else runtime.analyze(request, reduced)
+                from app.annotation_agent.schema import VisionRequest
+                if isinstance(request,VisionRequest):value=runtime.agent(request,reduced)
+                else:value = runtime.select_targets(request, reduced) if isinstance(request, TargetRequest) else runtime.analyze(request, reduced)
                 connection.send({"ok": True, "value": value})
             except Exception as error:
                 # torch is optional for deterministic lifecycle tests.

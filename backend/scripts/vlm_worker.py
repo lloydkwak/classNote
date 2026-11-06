@@ -35,11 +35,16 @@ def main():
                 message=json.loads(line)
                 if message.get("op") == "close":
                     break
-                if message.get("op") != "select_targets":
+                if message.get("op") not in {"select_targets","agent_plan","agent_review"}:
                     raise ValueError("unsupported_operation")
-                request=TargetRequest.model_validate(message["request"])
+                if message['op']=='select_targets':request=TargetRequest.model_validate(message['request'])
+                else:
+                    from app.annotation_agent.schema import VisionRequest
+                    request=VisionRequest.model_validate(message['request'])
+                    if request.operation!=message['op']:raise ValueError('operation_mismatch')
                 inside(request.image_path,root)
-                value=provider.select_targets(request,use_cache=message.get("use_cache",True))
+                value=(provider.select_targets(request,use_cache=message.get("use_cache",True)) if message['op']=='select_targets'
+                       else provider.agent(request,use_cache=message.get('use_cache',True)))
                 value["worker_environment"]={"python":sys.executable,"prefix":sys.prefix}
                 response={"ok":True,"value":value}
             except VLMFailure as error:

@@ -16,7 +16,7 @@ from app.grounding.schema import GroundingItem
 from app.grounding.selection import speech_error
 from app.pipeline.layout import wrap_text,text_runs,load_note_font,fallback_font,run_width
 
-VERSION="lecture-overview-v2-extractive-readable-math"
+VERSION="lecture-overview-v3-study"
 
 
 def page_mapping(count):
@@ -78,6 +78,15 @@ def attach_overview(folder,annotations,content=None):
     segments=[Segment.model_validate(s) for s in json.loads((folder/"segments.json").read_text())] if (folder/"segments.json").exists() else []
     alignment=Alignment.model_validate_json((folder/"alignment.json").read_text()) if (folder/"alignment.json").exists() else None
     annotations.overview,annotations.page_mapping=build_overview(folder/"input.pdf",annotations,content,segments,alignment)
+    from app.pipeline.overview_synthesis import load_synthesis
+    synthesis=load_synthesis(folder,content,segments)
+    if synthesis:
+        annotations.overview['study']=synthesis['study']
+        annotations.overview['synthesis_fingerprint']=synthesis['fingerprint']
+        annotations.overview['synthesis_status']='validated'
+    else:
+        annotations.overview['synthesis_status']='source_excerpt_fallback'
+    annotations.overview['fingerprint']=fingerprint({k:v for k,v in annotations.overview.items() if k!='fingerprint'})
     return annotations
 
 
@@ -119,44 +128,116 @@ def presentation_plan(data):
         k for row in result if row["compressed"] for k in row["knowledge_ids"]))}
 
 
+def _study_sections(data):
+    study=data.get('study')
+    if not study:
+        # Safe legacy/no-provider fallback: selected source explanations, no invented
+        # whole-lecture synthesis. Full claims stay intact in Detailed Notes.
+        records=sorted(data.get('records',[]),key=lambda r:-r['importance'])
+        sections=[]
+        seen=set()
+        for record in records:
+            identity=record['title'].casefold()
+            if identity in seen:continue
+            seen.add(identity)
+            sections.append((record['title'],record['text']))
+        return data['title'], '', [('SOURCE EXPLANATIONS',sections[:6])]
+    def displayed_math(expression):
+        from app.grounding.selection import SPOKEN_GREEK
+        for symbol,name in SPOKEN_GREEK.items():expression=re.sub(r'\b'+name+r'\b',symbol,expression,flags=re.I)
+        return expression
+    sections=[('LEARNING GOALS',[(p.get('title',''),p['text']) for p in study['objectives']]),
+              ('CORE CONCEPTS',[(p['title'],p['text']) for p in study['concepts']]),
+              ('FORMULAS / PRINCIPLES',[(displayed_math(p['expression']),p['meaning']) for p in study['formulas']]),
+              ('WORKED EXAMPLES',[(p['title'],displayed_math(p['given'])+'  →  '+displayed_math(p['result'])+'\n'+p['explanation']) for p in study['examples']]),
+              ('CONNECT / REMEMBER',[(p.get('title',''),p['text']) for p in study['connections']+study['review_points']])]
+    return study['title'],study['introduction']['text'],[(title,rows) for title,rows in sections if rows]
+
+
+def study_presentation(data):
+    title,introduction,sections=_study_sections(data)
+    # Fixed lower bound. Whole cards are prioritized if a very long legacy job does
+    # not fit; nothing is clipped inside a mathematical expression.
+    for size in (11.5,11,10.5):
+        cards=[]
+        for heading,rows in sections:
+            cards.append(('section',heading,11,18))
+            for label,text in rows:
+                if label:cards.extend(('label',line,size+1,(size+1)*1.35) for line in wrap_text(label,507,size+1,'pretendard'))
+                for paragraph in text.split('\n'):
+                    cards.extend(('body',line,size,size*1.38) for line in wrap_text(paragraph,507,size,'pretendard'))
+                cards.append(('space','',size,7))
+        intro=wrap_text(introduction,515,size,'pretendard') if introduction else []
+        total=len(intro)*size*1.4+sum(c[3] for c in cards)
+        if total<=628:return intro,cards,size,False
+    # Compress structure, not equations or sentences: keep the introduction,
+    # all core concepts/formulas/examples, and prioritize optional review cards.
+    if data.get('study'):
+        sections=[(heading,rows[:2] if heading=='LEARNING GOALS' else rows[:1] if heading=='CONNECT / REMEMBER' else rows)
+                  for heading,rows in sections]
+        sections=[(heading,[(label,'') for label,text in rows] if heading=='FORMULAS / PRINCIPLES' else rows)
+                  for heading,rows in sections]
+        sections=[(heading,[('',text) if heading=='WORKED EXAMPLES' and '=' in label else (label,text) for label,text in rows]) for heading,rows in sections]
+        intro=wrap_text(introduction,515,10.5,'pretendard')
+        cards=[]
+        for heading,rows in sections:
+            cards.append(('section',heading,10.5,18))
+            for label,text in rows:
+                if label:cards.extend(('label',line,11.5,15.5) for line in wrap_text(label,507,11.5,'pretendard'))
+                for paragraph in text.split('\n'):
+                    if paragraph:cards.extend(('body',line,10.5,14.5) for line in wrap_text(paragraph,507,10.5,'pretendard'))
+                cards.append(('space','',10.5,4))
+        if len(intro)*14.7+sum(c[3] for c in cards)<=620:
+            return intro,cards,10.5,True
+    # Very long legacy/source-only fallback. Keep one heading and one complete short
+    # claim per distinct concept; the full source remains available in Detailed Notes.
+    intro=wrap_text(introduction,515,10.5,'pretendard')
+    cards=[];used=len(intro)*14.7
+    for heading,rows in sections:
+        included=False
+        for label,text in rows:
+            lines=wrap_text((label+' — ' if label else '')+text.replace('\n',' '),507,10.5,'pretendard')
+            height=(20 if not included else 6)+len(lines)*14.5
+            if used+height>590:continue
+            if not included:cards.append(('section',heading,10,20));included=True
+            cards.extend(('body',line,10.5,14.5) for line in lines);used+=height
+    cards.append(('body','Further explanations are preserved in Detailed Notes.',10.5,20))
+    return intro,cards,10.5,True
+
+
+
 def draw_overview(document,data):
     page=document.new_page(width=595,height=842)
     page.draw_rect(pymupdf.Rect(0,0,595,126),color=None,fill=(.08,.085,.12))
-    write_line(page,"classNote  /  LECTURE OVERVIEW",38,35,10,(.78,.72,1))
-    title_lines=wrap_text(data["title"],515,21,"pretendard")[:2]
-    for i,line in enumerate(title_lines):write_line(page,line,38,70+i*27,21,(1,1,1))
-    write_line(page,f"Source slides {data['source_page_count']}  ·  Validated knowledge {len(data['validated_knowledge_ids'])}",38,150,10)
-    flow=" → ".join(str(n) for n in data["flow_source_pages"][:14])+(" → …" if len(data["flow_source_pages"])>14 else "")
-    write_line(page,"LECTURE FLOW  /  "+(flow or "확인된 발화 근거가 없습니다"),38,175,11)
-    entries=data["entries"]
-    y=207
-    if not entries:
-        write_line(page,"요약을 확정할 강의 근거가 충분하지 않습니다.",38,y+15,13)
-        for i,line in enumerate(wrap_text("원본 슬라이드는 다음 페이지부터 그대로 보존됩니다. 전사와 상세 노트를 생성한 뒤 다시 export하면 발화에 근거한 개요가 추가됩니다.",515,11,"pretendard")):
-            write_line(page,line,38,y+47+i*18,11)
-    else:
-        presentation=data.get("presentation") or presentation_plan(data)
-        size=presentation["font_size"]
-        for number,(entry,row) in enumerate(zip(entries,presentation["rows"])):
-            y=207+number*row["row_budget"]
-            for index,line in enumerate(row["title_lines"]):
-                write_line(page,(f"{number+1:02d}  " if index==0 else "")+line,38,y,12);y+=17
-            label=f"원본 슬라이드 {entry['source_page']}"
-            if entry["audio_verified"]:
-                label+=f"  ·  {int(entry['start'])//60}:{int(entry['start'])%60:02d}–{int(entry['end'])//60}:{int(entry['end'])%60:02d}"
-            else: label+="  ·  오디오/페이지 연결 확인 필요"
-            write_line(page,label,38,y,9,(.39,.32,.62));y+=16
-            for line in row["text_lines"]:
-                write_line(page,line,38,y,size);y+=size*1.4
-    write_line(page,"발화 근거를 통과한 설명의 개요입니다. 세부 설명과 불확실성은 상세 노트에서 확인하세요.",38,807,8,(.35,.36,.42))
-    write_line(page,f"Overview  ·  {data['status']}  ·  Source slide indices remain unchanged",38,824,8,(.35,.36,.42))
+    write_line(page,'classNote  /  LECTURE OVERVIEW',38,35,10,(.78,.72,1))
+    title,_,_=_study_sections(data)
+    for i,line in enumerate(wrap_text(title,515,21,'pretendard')[:2]):
+        write_line(page,line,38,70+i*27,21,(1,1,1))
+    intro,cards,size,overflow=study_presentation(data)
+    y=153
+    for line in intro:write_line(page,line,38,y,size);y+=size*1.4
+    if intro:y+=12
+    for kind,text,font,height in cards:
+        if kind=='section':
+            y+=5
+            page.draw_line((38,y-9),(557,y-9),color=(.86,.85,.92),width=.5)
+            write_line(page,text,38,y+4,font,(.38,.30,.62));y+=height
+        elif kind=='space':y+=height
+        else:write_line(page,text,42,y,font);y+=height
+    data['study_presentation']={'font_size':size,'overflow':overflow,'bottom':y}
     return page
 
 
 def link_overview(document,data):
-    # Source labels point to the real exported slide. Audio seek controls live in the UI;
-    # an offline PDF cannot assume a public server URL or a registered custom protocol.
-    for entry in data["entries"]:
-        needle=f"원본 슬라이드 {entry['source_page']}  ·"
-        for area in document[0].search_for(needle):
-            document[0].insert_link({"kind":pymupdf.LINK_GOTO,"from":area,"page":entry["export_page_index"]})
+    # Links are attached to meaningful concept titles. No diagnostics or page/time
+    # inventory is printed. Mapping always uses source slide -> export index.
+    for entry in data['entries']:
+        for area in document[0].search_for(entry['title']):
+            document[0].insert_link({'kind':pymupdf.LINK_GOTO,'from':area,'page':entry['export_page_index']})
+    study=data.get('study',{})
+    sources={r['knowledge_id']:r['source_page'] for r in data.get('records',[])}
+    for point in study.get('concepts',[]):
+        target=next((sources[c['source_id']] for c in point['citations'] if c['source_id'] in sources),None)
+        if target is not None:
+            for area in document[0].search_for(point.get('title','')):
+                document[0].insert_link({'kind':pymupdf.LINK_GOTO,'from':area,'page':target})

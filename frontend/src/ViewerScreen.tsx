@@ -248,10 +248,15 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
       {showNotes && (
         <aside className="notes-pane">
           {page===0&&<section className="overview-topics"><span className="eyebrow">LECTURE OVERVIEW</span><h2>{annotations?.overview?.title??'강의 전체 개요'}</h2>
-            {annotations?.overview?.entries.map(entry=><article key={entry.source_slide_index}><h4>{entry.title}</h4><p>{entry.text}</p>
+            {!annotations?.overview?.study&&annotations?.overview?.entries.map(entry=><article key={entry.source_slide_index}><h4>{entry.title}</h4><p>{entry.text}</p>
               <button onClick={()=>goToPage(entry.source_page)}>원본 슬라이드 {entry.source_page} 보기</button>{' '}
               {hasAudio&&entry.audio_verified?<button onClick={()=>{goToPage(entry.source_page);player.playLecture(entry.start)}}>▶ {formatTime(entry.start)}–{formatTime(entry.end)}</button>:<p className="muted">오디오/페이지 연결 확인 필요</p>}
             </article>)}
+            {annotations?.overview?.study&&<div className="study-overview"><p>{annotations.overview.study.introduction.text}</p>
+              {([['학습 목표',annotations.overview.study.objectives],['핵심 개념',annotations.overview.study.concepts],['개념 연결',annotations.overview.study.connections],['복습 포인트',annotations.overview.study.review_points]] as const).map(([title,points])=>points.length>0&&<section key={title}><h3>{title}</h3>{points.map((point,n)=><article key={n}>{point.title&&<h4>{point.title}</h4>}<p>{point.text}</p></article>)}</section>)}
+              {annotations.overview.study.formulas.length>0&&<section><h3>꼭 기억할 공식</h3>{annotations.overview.study.formulas.map((formula,n)=><article key={n}><strong>{formula.expression}</strong><p>{formula.meaning}</p></article>)}</section>}
+              {annotations.overview.study.examples.length>0&&<section><h3>대표 예제</h3>{annotations.overview.study.examples.map((example,n)=><article key={n}><h4>{example.title}</h4><p>{example.given} → {example.result}</p><p>{example.explanation}</p></article>)}</section>}
+            </div>}
             {annotations?.overview?.status==='insufficient_evidence'&&<p>요약을 확정할 발화 근거가 충분하지 않습니다. 원본 슬라이드와 오디오를 먼저 확인해 주세요.</p>}
           </section>}
           <div hidden={page===0}>
@@ -315,7 +320,7 @@ export function ViewerScreen({ jobId }: { jobId: string }) {
                         </span>
                       )}
                     </span>
-                    <span lang={note.language}>{note.note}</span>
+                    <span lang={note.language}>{note.note||note.action_reason||'강의에서 설명한 요소 강조'}</span>
                     {note.provenance?.target_kind==='figure'&&<small className="muted">그림 영역과 연결 · 내부 기호의 의미는 확인이 필요해요.</small>}
                   </button>
                   <details className="note-quote">

@@ -36,6 +36,9 @@ class Settings:
     vlm_python: Path = REPO_ROOT / ".venv-vlm/bin/python"
     vlm_timeout: float = 180
     layout_engine: str = "v2"
+    annotation_mode: str = "legacy"
+    annotation_review_rounds: int = 2
+    overview_mode: str = "synthesis"
 
 
 def get_settings() -> Settings:
@@ -61,4 +64,7 @@ def get_settings() -> Settings:
         vlm_python=Path(os.environ.get("VLM_PYTHON") or REPO_ROOT / ".venv-vlm/bin/python"),
         vlm_timeout=float(os.environ.get("VLM_TIMEOUT_SECONDS", "180")),
         layout_engine=os.environ.get("LAYOUT_ENGINE","v2"),
+        annotation_mode=os.environ.get("ANNOTATION_MODE","legacy"),
+        annotation_review_rounds=int(os.environ.get("ANNOTATION_REVIEW_ROUNDS","2")),
+        overview_mode=os.environ.get("OVERVIEW_MODE","synthesis"),
     )

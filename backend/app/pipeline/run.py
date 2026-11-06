@@ -49,9 +49,11 @@ def job_dir(job_id: str) -> Path:
 
 def create_job(
     pdf: Path, audio: Path | None, job_id: str | None = None, stt_model: str | None = None,
-    visual_grounding: bool | None = None,
+    visual_grounding: bool | None = None, annotation_mode: str | None = None,
 ) -> str:
     """Copy the inputs into a new job folder and return its id."""
+    annotation_mode=annotation_mode or get_settings().annotation_mode
+    if annotation_mode not in {"legacy","ai_planner","visual_agent"}:raise ValueError("unsupported_annotation_mode")
     job_id = job_id or uuid.uuid4().hex[:12]
     folder = job_dir(job_id)
     folder.mkdir(parents=True, exist_ok=True)
@@ -59,7 +61,8 @@ def create_job(
     if audio is not None:
         shutil.copyfile(audio, folder / f"{AUDIO_SOURCE_PREFIX}{audio.suffix.lower()}")
     (folder / JOB_OPTIONS_NAME).write_text(json.dumps({"stt_model": stt_model,
-        "visual_grounding":get_settings().visual_grounding if visual_grounding is None else visual_grounding}), encoding="utf-8")
+        "visual_grounding":get_settings().visual_grounding if visual_grounding is None else visual_grounding,
+        "annotation_mode":annotation_mode}), encoding="utf-8")
     return job_id
 
 
@@ -183,7 +186,20 @@ def _step_notes(folder: Path) -> None:
     content.pdf_hash = hash_file(folder / PDF_NAME)
     content.provenance={"visual_grounding":_grounding_enabled(folder)}
     _write_atomically(folder / CONTENT_NAME, content.model_dump_json(indent=2))
-    if content.provenance["visual_grounding"]:
+    from app.annotation_agent.pipeline import configured_mode
+    mode=configured_mode(folder)
+    if get_settings().overview_mode=='synthesis':
+        try:
+            from app.pipeline.overview_synthesis import prepare_synthesis
+            from app.grounding.document import build_registries
+            prepare_synthesis(folder,content,_read_list(folder/SEGMENTS_NAME,Segment),build_registries(folder/PDF_NAME))
+        except Exception as error:
+            from app.pipeline.grounded_notes import write_json
+            write_json(folder/'overview_synthesis.json',{'status':'fallback','reason':type(error).__name__})
+    if mode!='legacy':
+        from app.annotation_agent.pipeline import prepare_agent
+        prepare_agent(folder,content,_read_list(folder/SEGMENTS_NAME,Segment),_read_alignment(folder),mode=mode)
+    elif content.provenance["visual_grounding"]:
         from app.pipeline.grounded_notes import prepare_grounding
         prepare_grounding(folder,content,_read_alignment(folder),_read_list(folder/SEGMENTS_NAME,Segment))
     notes,_,_ = _plan_notes(folder,content,"balanced")
@@ -272,6 +288,10 @@ def density_annotations(job_id: str, density: Density, layout: str | None = None
     notes,actions,manifest = _plan_notes(folder,content,density,allow_overflow=layout=="v2")
     annotations = consolidate(notes, extraction, job_id, max_notes_per_page=len(notes),layout_engine=layout,ink_style=ink_style)
     annotations.incomplete = not content.complete
+    from app.annotation_agent.pipeline import configured_mode
+    mode=configured_mode(folder)
+    if mode!='legacy':
+        annotations.agent_report=manifest.get('agent_report') if manifest else {'mode':mode,'status':'fallback','reason':'agent_missing_or_stale'}
     annotations.planning = planning_report(content, annotations, density)
     from app.pipeline.overview import attach_overview
     attach_overview(folder,annotations,content)
@@ -281,8 +301,9 @@ def density_annotations(job_id: str, density: Density, layout: str | None = None
                    actions,manifest,annotations,density)
         by_item={a.knowledge_id:a for a in actions}
         for row in annotations.planning:
-            action=by_item[row["item_id"]]
-            row["grounding"]=action.provenance.model_dump(mode="json")
+            action=by_item.get(row["item_id"])
+            if action:row["grounding"]=action.provenance.model_dump(mode="json")
+            row["action_ids"]=[a.action_id for a in actions if a.knowledge_id==row["item_id"]]
     from app.pipeline.loss_audit import build_loss_audit
     annotations.loss_audit=build_loss_audit(folder,content,annotations)
     return annotations
@@ -291,11 +312,17 @@ def density_annotations(job_id: str, density: Density, layout: str | None = None
 def _grounding_enabled(folder):
     path=folder/JOB_OPTIONS_NAME
     options=json.loads(path.read_text()) if path.exists() else {}
-    return bool(options.get("visual_grounding",get_settings().visual_grounding))
+    return bool(options.get("visual_grounding",get_settings().visual_grounding)) or options.get("annotation_mode")=="visual_agent"
 
 
 def _plan_notes(folder,content,density,allow_overflow=False):
     extraction=_read_extraction(folder)
+    from app.annotation_agent.pipeline import configured_mode,cached_plan
+    mode=configured_mode(folder)
+    if mode!='legacy':
+        notes,actions,manifest,report=cached_plan(folder,content,extraction,density,mode)
+        if manifest is not None:manifest['agent_report']=report
+        return notes,actions,manifest
     if content.provenance.get("visual_grounding"):
         from app.pipeline.grounded_notes import plan_grounded
         return plan_grounded(folder,content,extraction,density,allow_overflow=allow_overflow)
@@ -320,10 +347,11 @@ def export_density(job_id,density,output=None,layout=None,ink_style="natural"):
             temporary.unlink(missing_ok=True)
         _write_atomically(digest_path,hash_file(target))
     content=read_detailed_notes(job_id) if (folder/CONTENT_NAME).exists() else None
-    if content is not None and content.provenance.get("visual_grounding"):
+    from app.annotation_agent.pipeline import configured_mode
+    if content is not None and (content.provenance.get("visual_grounding") or configured_mode(folder)!="legacy"):
         from app.pipeline.grounded_notes import save_graph
         _,actions,manifest=_plan_notes(folder,content,density,allow_overflow=annotations.layout_engine=="v2")
-        save_graph(folder,content,_read_list(folder/SEGMENTS_NAME,Segment),_read_alignment(folder),
+        if manifest is not None:save_graph(folder,content,_read_list(folder/SEGMENTS_NAME,Segment),_read_alignment(folder),
                    actions,manifest,annotations,density,
                    export={"file":target.name,"sha256":hash_file(target),"evidence_revision":annotations.grounding["revision"]})
     return target

@@ -89,6 +89,14 @@ class GPUWorkerProvider:
         result["grounding"] = validate_selection(request, TargetSelections.model_validate(result["selection"]))
         return result
 
+    def agent(self,request,*,use_cache=True):
+        from app.annotation_agent.schema import VisionRequest,VisualPlan,Review
+        from app.annotation_agent.prompts import vision_prompt
+        request=VisionRequest.model_validate(request)
+        schema=VisualPlan if request.operation=='agent_plan' else Review
+        return self._request(request,vision_prompt(request),schema,request.operation,use_cache=use_cache,
+                             context=request.model_dump(mode='json',exclude={'image_path'}))
+
     def _request(self, request, prompt, output_schema, result_field, *, use_cache, context=None):
         # A single deadline includes queueing, model loading, generation and retry.
         deadline = time.monotonic() + self.config.timeout_seconds
@@ -97,7 +105,7 @@ class GPUWorkerProvider:
         try:
             payload = {"version": "worker-v1", "provider": f"{self.factory.__module__}.{self.factory.__qualname__}",
                        "config": self.config.model_dump(mode="json"),
-                       "page": request.page if isinstance(request, PageRequest) else request.registry.page,
+                       "page": request.page if hasattr(request,"page") else request.registry.page,
                        "image_sha256": hashlib.sha256(request.image_path.read_bytes()).hexdigest(),
                        "prompt": prompt, "operation": result_field, "context": context}
             key = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
