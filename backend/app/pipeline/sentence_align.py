@@ -49,6 +49,7 @@ class SentenceAlignConfig:
     off_topic_min_score: float = 0.08
     bm25_weight: float = 0.0
     cue_boost: float = 0.3  # magnitude of page-direction ramp added at slide-turn cue sentences
+    logistics_detection: bool = True  # mark scheduling/announcement sentences as off-topic
 
     @classmethod
     def from_env(cls) -> "SentenceAlignConfig":
@@ -63,7 +64,7 @@ class SentenceAlignConfig:
             "bm25_weight":       "SENT_BM25_WEIGHT",
             "cue_boost":         "SENT_CUE_BOOST",
         }
-        bool_map = {"confidence_boost": "SENT_CONFIDENCE_BOOST"}
+        bool_map = {"confidence_boost": "SENT_CONFIDENCE_BOOST", "logistics_detection": "SENT_LOGISTICS_DETECTION"}
         overrides: dict = {}
         for field, name in env_map.items():
             if os.environ.get(name):
@@ -217,6 +218,40 @@ def _apply_cue_boosts(
 
 
 # ---------------------------------------------------------------------------
+# Off-topic detection: logistics / announcements
+# ---------------------------------------------------------------------------
+
+# Patterns for administrative announcements that should not be aligned to any slide.
+# Kept intentionally narrow to avoid classifying lecture content as logistics.
+_LOGISTICS_PATTERNS = [
+    # Korean: scheduling announcements
+    re.compile(
+        r"(다음\s*주|이번\s*주|이번\s*달|오늘\s*까지).{0,30}(과제|숙제|시험|퀴즈|제출|마감|기한)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(과제|숙제|시험|퀴즈).{0,30}(마감|제출|기한|다음\s*주|이번\s*주|오늘\s*까지)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(출석\s*체크|출석\s*확인|조교님?\s*(이메일|연락|질문))", re.IGNORECASE),
+    # English: administrative scheduling
+    re.compile(
+        r"\b(homework|assignment|quiz)\b.{0,40}\b(due|submit|deadline|next\s+week|this\s+week)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(due|deadline|office\s+hours)\b.{0,40}\b(tomorrow|today|next\s+week|this\s+week)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(please\s+submit|don't\s+forget\s+to\s+submit|reminder\s*:)\b", re.IGNORECASE),
+]
+
+
+def _is_logistics(text: str) -> bool:
+    return any(p.search(text) for p in _LOGISTICS_PATTERNS)
+
+
+# ---------------------------------------------------------------------------
 # Score processing
 # ---------------------------------------------------------------------------
 
@@ -297,6 +332,10 @@ def align_sentence_similarities(
 
     raw_argmax = sim.argmax(axis=1)
     off_topic = sim.max(axis=1) < config.off_topic_min_score
+    if config.logistics_detection and windows is not None:
+        for i, w in enumerate(windows):
+            if _is_logistics(w.text):
+                off_topic[i] = True
     on_topic_idx = np.flatnonzero(~off_topic)
 
     if on_topic_idx.size == 0:
