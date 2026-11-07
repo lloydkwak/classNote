@@ -136,7 +136,18 @@ def _step_align(folder: Path) -> None:
                 folder.name,
             )
         windows = build_sentence_windows(segments)
-        alignment = align_sentence_windows(windows, extraction)
+        sa_config = SentenceAlignConfig.from_env()
+        llm = None
+        if sa_config.arbitration_threshold > 0:
+            try:
+                from app.llm import get_provider
+                llm = get_provider()
+            except Exception as exc:
+                log.warning("LLM arbitration requested but provider unavailable: %s", exc)
+        alignment = align_sentence_windows(
+            windows, extraction, config=sa_config,
+            llm=llm, pdf_path=folder / PDF_NAME,
+        )
     else:
         windows = _read_list(folder / WINDOWS_NAME, Window)
         alignment = align_windows(windows, extraction)

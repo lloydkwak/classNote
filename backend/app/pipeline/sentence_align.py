@@ -19,6 +19,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 import numpy as np
 
@@ -50,6 +51,8 @@ class SentenceAlignConfig:
     bm25_weight: float = 0.0
     cue_boost: float = 0.3  # magnitude of page-direction ramp added at slide-turn cue sentences
     logistics_detection: bool = True  # mark scheduling/announcement sentences as off-topic
+    arbitration_threshold: float = 0.0  # 0 = disabled; >0 triggers LLM for low-conf stretches
+    arbitration_max_calls: int = 5      # maximum LLM calls per alignment run
 
     @classmethod
     def from_env(cls) -> "SentenceAlignConfig":
@@ -62,7 +65,9 @@ class SentenceAlignConfig:
             "back_skip_penalty": "SENT_BACK_SKIP_PENALTY",
             "off_topic_min_score": "SENT_OFF_TOPIC_MIN_SCORE",
             "bm25_weight":       "SENT_BM25_WEIGHT",
-            "cue_boost":         "SENT_CUE_BOOST",
+            "cue_boost":             "SENT_CUE_BOOST",
+            "arbitration_threshold": "SENT_ARBITRATION_THRESHOLD",
+            "arbitration_max_calls": "SENT_ARBITRATION_MAX_CALLS",
         }
         bool_map = {"confidence_boost": "SENT_CONFIDENCE_BOOST", "logistics_detection": "SENT_LOGISTICS_DETECTION"}
         overrides: dict = {}
@@ -391,8 +396,11 @@ def align_sentence_windows(
     embedder=None,
     bm25_weight: float = 0.0,
     config: SentenceAlignConfig | None = None,
+    *,
+    llm=None,
+    pdf_path: Path | None = None,
 ) -> Alignment:
-    """Full v2 alignment: embed → BM25 mix → sentence DP → Alignment."""
+    """Full v2 alignment: embed → BM25 mix → sentence DP → LLM arbitration → Alignment."""
     from app.pipeline.page_align import get_embedder as _get_embedder
 
     embedder = embedder or _get_embedder()
@@ -408,6 +416,17 @@ def align_sentence_windows(
 
     numbers = [page.page for page in pages]
     decisions = align_sentence_similarities(sim, config, windows)
+
+    if config.arbitration_threshold > 0 and llm is not None:
+        from app.pipeline.llm_arbitration import arbitrate
+        decisions, n_calls = arbitrate(
+            windows, pages, numbers, decisions,
+            pdf_path=pdf_path, llm=llm,
+            threshold=config.arbitration_threshold,
+            max_calls=config.arbitration_max_calls,
+        )
+        if n_calls:
+            log.info("LLM arbitration: %d call(s) made", n_calls)
 
     aligned = [
         AlignedWindow(

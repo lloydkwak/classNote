@@ -212,6 +212,7 @@ def run_lecture(
     sa_config: SentenceAlignConfig,
     cache_dir: Path,
     allow_provisional: bool,
+    llm=None,
 ) -> dict | None:
     """Process one lecture. Returns accuracy dict or None if skipped."""
     lecture_id = lecture_dir.name
@@ -279,6 +280,19 @@ def run_lecture(
             sim = sem_sim
 
         decisions = align_sentence_similarities(sim, sa_config, windows)
+
+        # LLM arbitration for low-confidence stretches (optional)
+        llm_calls = 0
+        if llm is not None and sa_config.arbitration_threshold > 0:
+            from app.pipeline.llm_arbitration import arbitrate
+            page_numbers = [p.page for p in pages]
+            decisions, llm_calls = arbitrate(
+                windows, pages, page_numbers, decisions,
+                pdf_path=pdf_path, llm=llm,
+                threshold=sa_config.arbitration_threshold,
+                max_calls=sa_config.arbitration_max_calls,
+            )
+
         timestamps = [(w.start + w.end) / 2.0 for w in windows]
         pred_pages = [
             None if d.page_index is None else pages[d.page_index].page
@@ -295,6 +309,8 @@ def run_lecture(
         "bm25_weight": bm25_weight,
         **acc,
     }
+    if aligner == "v2":
+        result["llm_calls"] = locals().get("llm_calls", 0)
     return result
 
 
@@ -385,6 +401,10 @@ def main() -> int:
     parser.add_argument("--test-only", action="store_true")
     parser.add_argument("--tune", action="store_true",
                         help="Grid-search sharpening_exp × bm25_weight on train lectures")
+    parser.add_argument("--arbitrate", action="store_true",
+                        help="Enable LLM arbitration for low-confidence stretches (requires GEMINI_API_KEY)")
+    parser.add_argument("--arbitration-threshold", type=float, default=0.15,
+                        help="Confidence threshold below which LLM arbitration fires (default 0.15)")
     parser.add_argument("--allow-provisional", action="store_true", default=True)
     parser.add_argument("--output", type=Path,
                         help="Save JSON report to this path")
@@ -408,6 +428,18 @@ def main() -> int:
 
     sa_config = SentenceAlignConfig(bm25_weight=args.bm25_weight)
 
+    # LLM arbitration setup
+    llm = None
+    if args.arbitrate and args.aligner == "v2":
+        try:
+            from app.llm import get_provider
+            llm = get_provider()
+            from dataclasses import replace as dc_replace
+            sa_config = dc_replace(sa_config, arbitration_threshold=args.arbitration_threshold)
+            print(f"LLM arbitration enabled (threshold={args.arbitration_threshold})")
+        except Exception as e:
+            print(f"LLM arbitration unavailable: {e}")
+
     # Tuning: runs only on train, then uses best config for all
     if args.tune:
         if args.aligner != "v2":
@@ -421,10 +453,11 @@ def main() -> int:
         print(f"  {d.name} …", end=" ", flush=True)
         r = run_lecture(
             d, args.embedder, args.aligner, sa_config.bm25_weight,
-            sa_config, args.cache_dir, args.allow_provisional,
+            sa_config, args.cache_dir, args.allow_provisional, llm,
         )
         if r:
-            print(f"exact={r['exact']:.3f} ({r['n_scored']}/{r['n_total']} scored)", flush=True)
+            calls_str = f" llm_calls={r.get('llm_calls', 0)}" if llm else ""
+            print(f"exact={r['exact']:.3f} ({r['n_scored']}/{r['n_total']} scored){calls_str}", flush=True)
             results.append(r)
         else:
             print("skipped", flush=True)
