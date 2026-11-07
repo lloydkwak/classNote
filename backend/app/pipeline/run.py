@@ -21,6 +21,7 @@ from app.pipeline.page_align import align_windows
 from app.pipeline.page_audio import build_page_audio
 from app.pipeline.mentions import find_mentions
 from app.pipeline.pdf_extract import add_geometry, extract_pdf
+from app.pipeline.sentence_align import SentenceAlignConfig, align_sentence_windows, build_sentence_windows
 from app.pipeline.stt import transcribe
 from app.pipeline.windowing import build_windows
 from app.pipeline.rich_notes import DetailedNotes, Density, extract_content, plan_annotations, planning_report
@@ -121,7 +122,14 @@ def _step_window(folder: Path) -> None:
 
 
 def _step_align(folder: Path) -> None:
-    alignment = align_windows(_read_list(folder / WINDOWS_NAME, Window), _read_extraction(folder))
+    extraction = _read_extraction(folder)
+    if get_settings().alignment_version == "v2":
+        segments = _read_list(folder / SEGMENTS_NAME, Segment)
+        windows = build_sentence_windows(segments)
+        alignment = align_sentence_windows(windows, extraction)
+    else:
+        windows = _read_list(folder / WINDOWS_NAME, Window)
+        alignment = align_windows(windows, extraction)
     (folder / ALIGNMENT_NAME).write_text(alignment.model_dump_json(indent=2), encoding="utf-8")
     _step_page_audio(folder)
 

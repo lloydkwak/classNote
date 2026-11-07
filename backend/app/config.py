@@ -39,6 +39,7 @@ class Settings:
     annotation_mode: str = "legacy"
     annotation_review_rounds: int = 2
     overview_mode: str = "synthesis"
+    alignment_version: str = "v1"
 
 
 def get_settings() -> Settings:
@@ -67,4 +68,5 @@ def get_settings() -> Settings:
         annotation_mode=os.environ.get("ANNOTATION_MODE","legacy"),
         annotation_review_rounds=int(os.environ.get("ANNOTATION_REVIEW_ROUNDS","2")),
         overview_mode=os.environ.get("OVERVIEW_MODE","synthesis"),
+        alignment_version=os.environ.get("ALIGNMENT_VERSION","v1"),
     )

@@ -23,6 +23,7 @@ from app.pipeline.audio import FfmpegError, convert_to_mp3, find_ffmpeg
 from app.pipeline.block_align import build_spans, generate_span_notes
 from app.pipeline.figure_caption import caption_figures
 from app.pipeline.page_align import align_windows, get_embedder, page_text
+from app.pipeline.sentence_align import align_sentence_windows, build_sentence_windows
 from app.pipeline.stt import build_prompt as build_stt_prompt
 from app.pipeline.stt import get_stt_provider
 from app.pipeline.windowing import DEFAULT_WINDOW_SECONDS, build_windows
@@ -168,19 +169,29 @@ class LiveSession:
         self._segments.extend(new)
 
     def _align(self, final: bool) -> Alignment:
-        windows = build_windows(self._segments)
-        # A window that's still filling up could change, until the talk ends.
-        closed = (
-            windows
-            if final
-            else [w for w in windows if w.end - w.start >= DEFAULT_WINDOW_SECONDS]
-        )
+        from app.config import get_settings
         extraction = pipeline._read_extraction(self.folder)
-        alignment = align_windows(
-            closed, extraction, self._embedder, frozen_pages=self._frozen_pages
-        )
-        decided = [window.page for window in alignment.windows]
-        keep = len(decided) if final else max(len(decided) - UNFROZEN_WINDOWS, len(self._frozen_pages))
+        if get_settings().alignment_version == "v2":
+            windows = build_sentence_windows(self._segments)
+            # Sentence windows are always complete; just hold back the last one
+            # so a mid-sentence topic change doesn't lock in prematurely.
+            closed = windows if final else windows[:-UNFROZEN_WINDOWS] if len(windows) > UNFROZEN_WINDOWS else []
+            alignment = align_sentence_windows(closed, extraction, self._embedder)
+            decided = [window.page for window in alignment.windows]
+            keep = len(decided) if final else max(len(decided) - UNFROZEN_WINDOWS, 0)
+        else:
+            windows = build_windows(self._segments)
+            # A window that's still filling up could change, until the talk ends.
+            closed = (
+                windows
+                if final
+                else [w for w in windows if w.end - w.start >= DEFAULT_WINDOW_SECONDS]
+            )
+            alignment = align_windows(
+                closed, extraction, self._embedder, frozen_pages=self._frozen_pages
+            )
+            decided = [window.page for window in alignment.windows]
+            keep = len(decided) if final else max(len(decided) - UNFROZEN_WINDOWS, len(self._frozen_pages))
         self._frozen_pages = decided[:keep]
         return alignment
 
