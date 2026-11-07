@@ -252,9 +252,14 @@ class Qwen3Embedder:
     )
 
     def __init__(self, model: str = "Qwen/Qwen3-Embedding-0.6B") -> None:
+        import torch
         from sentence_transformers import SentenceTransformer
 
-        self._model = SentenceTransformer(model, device="cpu")
+        # Force float32 on CPU — the model's native bfloat16 is significantly
+        # slower on most CPUs and produces the same results for embedding.
+        self._model = SentenceTransformer(
+            model, device="cpu", model_kwargs={"torch_dtype": torch.float32}
+        )
 
     def embed_queries(self, texts: list[str]) -> np.ndarray:
         return self._model.encode(

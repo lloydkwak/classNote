@@ -35,7 +35,7 @@ _EPS = 1e-9
 
 @dataclass(frozen=True)
 class SentenceAlignConfig:
-    sharpening_exp: float = 3.0
+    sharpening_exp: float = 1.0   # tuned on MaViLS: z-score+range-norm already concentrates signal
     confidence_boost: bool = True
     next_page_cost: float = 0.3
     skip_penalty: float = 0.3

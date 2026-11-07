@@ -425,10 +425,10 @@ def main() -> int:
             sa_config, args.cache_dir, args.allow_provisional,
         )
         if r:
-            print(f"exact={r['exact']:.3f} ({r['n_scored']}/{r['n_total']} scored)")
+            print(f"exact={r['exact']:.3f} ({r['n_scored']}/{r['n_total']} scored)", flush=True)
             results.append(r)
         else:
-            print("skipped")
+            print("skipped", flush=True)
 
     if not results:
         print("No results.")
