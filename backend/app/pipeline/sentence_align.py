@@ -8,14 +8,16 @@ Algorithm:
   5. max-normalize each row (best score = 1 per sentence).
   6. Sharpen with exponent k (norm^k concentrates mass on the best page).
   7. If confidence_boost: scale each sharpened row by the original max cosine.
-  8. Run Viterbi DP with page-ordered costs.
-  9. Confidence = gap between best and 2nd-best in the boosted space.
+  8. Apply slide-turn cue boosts (optional): add a direction ramp at cue positions.
+  9. Run Viterbi DP with page-ordered costs.
+  10. Confidence = gap between best and 2nd-best in the boosted space.
 
 Reuses viterbi() and transition_penalties() from page_align.
 """
 
 import logging
 import os
+import re
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -46,6 +48,7 @@ class SentenceAlignConfig:
     back_skip_penalty: float = 0.3
     off_topic_min_score: float = 0.08
     bm25_weight: float = 0.0
+    cue_boost: float = 0.3  # magnitude of page-direction ramp added at slide-turn cue sentences
 
     @classmethod
     def from_env(cls) -> "SentenceAlignConfig":
@@ -58,6 +61,7 @@ class SentenceAlignConfig:
             "back_skip_penalty": "SENT_BACK_SKIP_PENALTY",
             "off_topic_min_score": "SENT_OFF_TOPIC_MIN_SCORE",
             "bm25_weight":       "SENT_BM25_WEIGHT",
+            "cue_boost":         "SENT_CUE_BOOST",
         }
         bool_map = {"confidence_boost": "SENT_CONFIDENCE_BOOST"}
         overrides: dict = {}
@@ -142,6 +146,77 @@ def _buf_to_window(window_id: int, words: list[SpokenWord]) -> Window:
 
 
 # ---------------------------------------------------------------------------
+# Slide-turn cue detection
+# ---------------------------------------------------------------------------
+
+# Phrases that signal the professor is commanding the next slide to appear.
+# Keep these conservative — conversational phrases like "going back to", "as we saw",
+# "if you recall" are NOT slide commands and produce false positives.
+_NEXT_SLIDE_CUES: list[str] = [
+    # Korean — explicit advance commands
+    "다음 장으로", "다음 슬라이드로", "다음 페이지로",
+    "다음 장을 보", "다음 슬라이드를 보",
+    "넘어가겠습니다", "넘어가 보겠습니다", "넘어갑니다",
+    # English — imperative slide advance ("next slide please", "okay next slide")
+    "next slide",
+    "go to the next slide", "advance the slide", "click to the next slide",
+]
+
+# Phrases that signal a command to go back to an earlier slide.
+_BACK_CUES: list[str] = [
+    # Korean
+    "앞 슬라이드로", "이전 슬라이드로", "앞 장으로", "한 장 앞으로",
+    # English — imperative back navigation
+    "go back to the slide", "back to the previous slide",
+    "can you go back", "can we go back", "previous slide",
+]
+
+
+def detect_slide_cues(windows: list["Window"]) -> tuple[set[int], set[int]]:
+    """Return (next_indices, back_indices) of windows containing slide-turn phrases."""
+    next_set: set[int] = set()
+    back_set: set[int] = set()
+    for i, w in enumerate(windows):
+        lower = w.text.lower()
+        if any(cue in lower for cue in _NEXT_SLIDE_CUES):
+            next_set.add(i)
+        elif any(cue in lower for cue in _BACK_CUES):
+            back_set.add(i)
+    return next_set, back_set
+
+
+def _apply_cue_boosts(
+    boosted: np.ndarray,
+    on_topic_idx: np.ndarray,
+    next_cue_idxs: set[int],
+    back_cue_idxs: set[int],
+    boost: float,
+) -> np.ndarray:
+    """Add a linear page-direction ramp at cue rows in the on-topic boosted matrix.
+
+    'Next slide' cues get a ramp that increases toward later pages; 'back' cues
+    get the reverse.  The ramp biases the DP to advance or retreat at that sentence
+    without overriding the semantic signal — it only tips close decisions.
+    """
+    n_pages = boosted.shape[1]
+    if n_pages < 2 or boost <= 0 or (not next_cue_idxs and not back_cue_idxs):
+        return boosted
+    idx_to_row = {int(orig): row for row, orig in enumerate(on_topic_idx)}
+    ramp_fwd = np.linspace(0.0, boost, n_pages)
+    ramp_bck = ramp_fwd[::-1]
+    result = boosted.copy()
+    for orig_i in next_cue_idxs:
+        row = idx_to_row.get(orig_i)
+        if row is not None:
+            result[row] += ramp_fwd
+    for orig_i in back_cue_idxs:
+        row = idx_to_row.get(orig_i)
+        if row is not None:
+            result[row] += ramp_bck
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Score processing
 # ---------------------------------------------------------------------------
 
@@ -207,11 +282,14 @@ def bm25_matrix(windows: list[Window], pages: list[Page]) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def align_sentence_similarities(
-    sim: np.ndarray, config: SentenceAlignConfig
+    sim: np.ndarray,
+    config: SentenceAlignConfig,
+    windows: list | None = None,
 ) -> list[WindowDecision]:
     """Align a sentences × pages similarity matrix using the v2 algorithm.
 
     Off-topic sentences get page_index=None and do not enter the DP.
+    Pass `windows` to enable slide-turn cue detection (cue_boost > 0).
     """
     n_windows, n_pages = sim.shape
     if n_windows == 0 or n_pages == 0:
@@ -240,6 +318,12 @@ def align_sentence_similarities(
         boosted = sharp * row_max
     else:
         boosted = sharp
+
+    # Slide-turn cue boosts: bias DP toward advancement at "next slide" phrases.
+    if config.cue_boost > 0 and windows is not None:
+        next_cues, back_cues = detect_slide_cues(windows)
+        if next_cues or back_cues:
+            boosted = _apply_cue_boosts(boosted, on_topic_idx, next_cues, back_cues, config.cue_boost)
 
     dp_config = _to_align_config(config)
     path = viterbi(boosted, dp_config)
@@ -284,7 +368,7 @@ def align_sentence_windows(
         sim = sem_sim
 
     numbers = [page.page for page in pages]
-    decisions = align_sentence_similarities(sim, config)
+    decisions = align_sentence_similarities(sim, config, windows)
 
     aligned = [
         AlignedWindow(
