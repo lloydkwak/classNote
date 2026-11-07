@@ -4,11 +4,14 @@ Because each step's inputs are on disk, a run can resume from any step.
 """
 
 import json
+import logging
 import shutil
 import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 from app.config import get_settings
 from app.cache import hash_file
@@ -125,6 +128,13 @@ def _step_align(folder: Path) -> None:
     extraction = _read_extraction(folder)
     if get_settings().alignment_version == "v2":
         segments = _read_list(folder / SEGMENTS_NAME, Segment)
+        if segments and not any(s.words for s in segments):
+            log.warning(
+                "ALIGNMENT_VERSION=v2 but no word timestamps in segments.json. "
+                "Re-run the transcribe step (faster-whisper emits word timestamps): "
+                "uv run python scripts/run_pipeline.py --job-id %s --from-step transcribe",
+                folder.name,
+            )
         windows = build_sentence_windows(segments)
         alignment = align_sentence_windows(windows, extraction)
     else:

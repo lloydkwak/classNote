@@ -14,10 +14,13 @@ Algorithm:
 Reuses viterbi() and transition_penalties() from page_align.
 """
 
+import logging
 import os
 from dataclasses import dataclass, replace
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 from app.models import AlignedWindow, Alignment, Page, PdfExtraction, Segment, SpokenWord, Window
 from app.pipeline.page_align import (
@@ -97,8 +100,9 @@ def _is_sent_end(w: SpokenWord) -> bool:
 def build_sentence_windows(segments: list[Segment]) -> list[Window]:
     """Group SpokenWord tokens into sentence-level Windows.
 
-    If segments have no word-level timestamps (mock STT), each segment becomes
-    one window, using its own start/end.
+    If segments have no word-level timestamps (mock STT or OpenAI provider),
+    each segment becomes one window using its own start/end. This is a coarser
+    fallback; re-transcribe with faster-whisper to get true sentence windows.
     """
     # Flatten words from all segments
     all_words: list[SpokenWord] = []
@@ -106,6 +110,12 @@ def build_sentence_windows(segments: list[Segment]) -> list[Window]:
         all_words.extend(seg.words)
 
     if not all_words:
+        log.warning(
+            "v2 aligner: no word-level timestamps found in %d segment(s). "
+            "Falling back to one window per segment (coarser alignment). "
+            "Re-run the transcribe step with faster-whisper to get word timestamps.",
+            len(segments),
+        )
         # Fallback: treat each segment as one window
         return [
             Window(window_id=i, start=seg.start, end=seg.end, text=seg.text)
