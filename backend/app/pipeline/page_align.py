@@ -225,18 +225,71 @@ class MockEmbedder:
         return np.array([self._embed(text) for text in texts])
 
 
+class BgeM3Embedder:
+    """BAAI/bge-m3 — MIT license. Uses same query:/passage: prefixes as E5."""
+
+    def __init__(self, model: str = "BAAI/bge-m3") -> None:
+        from sentence_transformers import SentenceTransformer
+
+        self._model = SentenceTransformer(model, device="cpu")
+
+    def embed_queries(self, texts: list[str]) -> np.ndarray:
+        return self._model.encode(
+            [f"query: {t}" for t in texts], normalize_embeddings=True, batch_size=16
+        )
+
+    def embed_passages(self, texts: list[str]) -> np.ndarray:
+        return self._model.encode(
+            [f"passage: {t}" for t in texts], normalize_embeddings=True, batch_size=16
+        )
+
+
+class Qwen3Embedder:
+    """Qwen/Qwen3-Embedding-0.6B — Apache-2.0. Uses task instruction prefix for queries."""
+
+    _QUERY_PREFIX = (
+        "Instruct: Retrieve relevant lecture slide for this speech excerpt.\nQuery: "
+    )
+
+    def __init__(self, model: str = "Qwen/Qwen3-Embedding-0.6B") -> None:
+        from sentence_transformers import SentenceTransformer
+
+        self._model = SentenceTransformer(model, device="cpu")
+
+    def embed_queries(self, texts: list[str]) -> np.ndarray:
+        return self._model.encode(
+            [self._QUERY_PREFIX + t for t in texts], normalize_embeddings=True, batch_size=16
+        )
+
+    def embed_passages(self, texts: list[str]) -> np.ndarray:
+        return self._model.encode(texts, normalize_embeddings=True, batch_size=16)
+
+
 @lru_cache(maxsize=1)
 def _load_e5(model: str) -> E5Embedder:
     return E5Embedder(model)
 
 
-def get_embedder():
+@lru_cache(maxsize=1)
+def _load_bge(model: str) -> BgeM3Embedder:
+    return BgeM3Embedder(model)
+
+
+@lru_cache(maxsize=1)
+def _load_qwen3(model: str) -> Qwen3Embedder:
+    return Qwen3Embedder(model)
+
+
+def get_embedder(model: str | None = None):
     settings = get_settings()
-    if settings.embedding_provider == "e5":
-        return _load_e5(settings.embedding_model)
+    effective_model = model or settings.embedding_model
     if settings.embedding_provider == "mock":
         return MockEmbedder()
-    raise ValueError(f"Unknown EMBEDDING_PROVIDER: {settings.embedding_provider!r}")
+    if "bge-m3" in effective_model:
+        return _load_bge(effective_model)
+    if "Qwen3-Embedding" in effective_model or "Qwen/Qwen3-Embed" in effective_model:
+        return _load_qwen3(effective_model)
+    return _load_e5(effective_model)
 
 
 def page_text(page: Page) -> str:
