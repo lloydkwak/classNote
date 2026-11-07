@@ -87,8 +87,23 @@ def _run_simple(alignment_path: Path, truth_path: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Job mode — full EvaluationDataset metrics
+# Job mode — compare v1+e5, v2+e5, v2+bge-m3 on a verified job
 # ---------------------------------------------------------------------------
+
+def _build_v2_alignment(segments, extraction, embedder_name: str):
+    """Run the v2 sentence aligner with the named embedder; return an Alignment."""
+    from app.pipeline.page_align import get_embedder
+    from app.pipeline.sentence_align import SentenceAlignConfig, align_sentence_windows, build_sentence_windows
+
+    print(f"  computing v2+{embedder_name}…", end=" ", flush=True)
+    embedder = get_embedder(None if embedder_name == "e5" else
+                            "BAAI/bge-m3" if embedder_name == "bge-m3" else
+                            "Qwen/Qwen3-Embedding-0.6B")
+    windows = build_sentence_windows(segments)
+    al = align_sentence_windows(windows, extraction, embedder, config=SentenceAlignConfig())
+    print(f"done ({len(windows)} sentence windows)")
+    return al
+
 
 def _run_job(job_id: str, allow_provisional: bool) -> int:
     from app.evaluation.experiments import replay
@@ -113,34 +128,99 @@ def _run_job(job_id: str, allow_provisional: bool) -> int:
     segments   = [Segment.model_validate(r) for r in
                   json.loads((folder / "segments.json").read_text(encoding="utf-8"))]
 
-    eligible = [l for l in dataset.alignment_labels
-                if l.review.status == "verified"
-                or (allow_provisional and l.review.status in {"verified", "provisional"})]
-    if not eligible:
+    eligible_labels = [l for l in dataset.alignment_labels
+                       if l.review.status == "verified"
+                       or (allow_provisional and l.review.status in {"verified", "provisional"})]
+    if not eligible_labels:
         status = "provisional or verified" if allow_provisional else "verified"
         sys.exit(
             f"No {status} labels found in the dataset (revision {dataset.revision}).\n"
             "Verify labels in the inspector or add --allow-provisional."
         )
 
-    print(f"Dataset {dataset.dataset_id!r} revision {dataset.revision}, "
-          f"{len(eligible)} eligible labels (allow_provisional={allow_provisional})")
+    print(f"Job {job_id}  dataset {dataset.dataset_id!r} rev {dataset.revision}  "
+          f"{len(eligible_labels)} eligible labels  allow_provisional={allow_provisional}")
     print()
 
-    rows = {}
-    for variant in ("saved", "current", "hybrid", "hybrid_refined"):
-        pred = replay(alignment, extraction, segments, variant)
+    # Build all systems to compare
+    systems: dict[str, "Alignment"] = {
+        "v1+e5": replay(alignment, extraction, segments, "saved"),
+    }
+    for emb in ("e5", "bge-m3"):
+        systems[f"v2+{emb}"] = _build_v2_alignment(segments, extraction, emb)
+    print()
+
+    # Print summary table
+    hdr = f"  {'System':<14} {'Exact':>8} {'±1':>8} {'Transitions':>13} {'Coverage':>9} {'Eval s':>8}"
+    print(hdr)
+    print("  " + "-" * (len(hdr) - 2))
+    all_metrics: dict[str, dict] = {}
+    for name, pred in systems.items():
         m = alignment_metrics(pred, dataset, allow_provisional)
-        rows[variant] = m
-        print(f"  {variant:16s}: "
-              f"exact={m['exact_page_accuracy']:.1%}  "
-              f"±1={m['within_one_page_accuracy']:.1%}  "
-              f"transitions={m['transition_accuracy']}  "
-              f"verified_labels={m['verified_label_count']}")
-
+        all_metrics[name] = m
+        exact  = m["exact_page_accuracy"]  or 0.0
+        near   = m["within_one_page_accuracy"] or 0.0
+        trans  = m["transition_accuracy"]
+        cov    = m["recording_coverage"] or 0.0
+        ev_s   = m["evaluated_seconds"]
+        trans_s = f"{trans:.0%}" if trans is not None else "n/a"
+        print(f"  {name:<14} {exact:8.1%} {near:8.1%} {trans_s:>13} {cov:9.1%} {ev_s:8.1f}")
     print()
-    print("Full metrics for 'saved' (the stored DP result):")
-    print(json.dumps(rows["saved"], indent=2))
+
+    # Per-label breakdown
+    print("Per-label breakdown (% of label duration correctly predicted):")
+    sys_names = list(systems.keys())
+    col_w = 10
+    header_parts = ["  #  ", f"{'Range':>22}", f"{'Gold':>6}"]
+    for n in sys_names:
+        header_parts.append(f"{n:>{col_w}}")
+    print("".join(header_parts))
+    print("  " + "-" * (len("".join(header_parts)) - 2))
+
+    for i, label in enumerate(eligible_labels):
+        row = [f"  {i+1:<3}", f"  {label.start:7.1f}–{label.end:7.1f}s",
+               f"  p{'&'.join(str(p) for p in label.pages) or 'off':4s}"]
+        for name, pred in systems.items():
+            correct_s = total_s = 0.0
+            for window in pred.windows:
+                sec = max(0.0, min(window.end, label.end) - max(window.start, label.start))
+                if sec <= 0:
+                    continue
+                total_s += sec
+                if label.pages:
+                    correct_s += sec * (window.page in label.pages)
+                else:
+                    correct_s += sec * (window.page is None)
+            pct = correct_s / total_s if total_s else 0.0
+            mark = "✓" if pct >= 0.9 else ("~" if pct >= 0.5 else "✗")
+            row.append(f" {mark}{pct:6.0%}  ")
+        print("".join(row))
+    print()
+
+    # Per-system error details (worst windows in wrong labels)
+    for name, pred in systems.items():
+        wrong_windows = []
+        for label in eligible_labels:
+            for window in pred.windows:
+                sec = max(0.0, min(window.end, label.end) - max(window.start, label.start))
+                if sec <= 0:
+                    continue
+                if label.pages and window.page not in label.pages:
+                    wrong_windows.append((sec, label, window))
+                elif not label.pages and window.page is not None:
+                    wrong_windows.append((sec, label, window))
+        if not wrong_windows:
+            print(f"  {name}: no errors")
+        else:
+            total_wrong = sum(s for s, _, _ in wrong_windows)
+            print(f"  {name}: {total_wrong:.1f}s wrong across {len(wrong_windows)} window(s)")
+            for sec, label, window in sorted(wrong_windows, key=lambda x: -x[0])[:5]:
+                gold_str = f"p{'&'.join(str(p) for p in label.pages) or 'off'}"
+                print(f"    t={window.start:.1f}–{window.end:.1f}s  "
+                      f"predicted p{window.page}  gold {gold_str}  "
+                      f"({sec:.1f}s wrong)  {window.text[:60]!r}")
+    print()
+
     return 0
 
 

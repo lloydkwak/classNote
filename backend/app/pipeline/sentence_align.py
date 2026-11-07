@@ -138,9 +138,7 @@ def _buf_to_window(window_id: int, words: list[SpokenWord]) -> Window:
     start = words[0].start
     end   = words[-1].end
     text  = " ".join(w.text for w in words)
-    # Use midpoint as start (consistent with import_mavils sentence timestamp)
-    mid = (start + end) / 2.0
-    return Window(window_id=window_id, start=mid, end=mid, text=text)
+    return Window(window_id=window_id, start=start, end=end, text=text)
 
 
 # ---------------------------------------------------------------------------

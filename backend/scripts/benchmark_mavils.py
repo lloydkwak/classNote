@@ -279,8 +279,7 @@ def run_lecture(
             sim = sem_sim
 
         decisions = align_sentence_similarities(sim, sa_config)
-        # Sentence timestamps are midpoints (start == end in build_sentence_windows)
-        timestamps = [w.start for w in windows]
+        timestamps = [(w.start + w.end) / 2.0 for w in windows]
         pred_pages = [
             None if d.page_index is None else pages[d.page_index].page
             for d in decisions
