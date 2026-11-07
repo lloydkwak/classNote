@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "notes_gold.schema.json",
+  "title": "Notes gold — reference annotations for one lecture slide",
+  "description": "Human-authored reference notes in the action schema used by the pipeline. Collect by watching the lecture recording for one slide and writing what a strong student would note. Word and block IDs come from extraction.json for that job.",
+  "type": "object",
+  "required": ["page", "job", "reviewed_by", "reviewed_at", "actions"],
+  "additionalProperties": false,
+  "properties": {
+    "page": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "1-based page number in the lecture PDF."
+    },
+    "job": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Job ID whose extraction.json defines the word/block IDs used here."
+    },
+    "reviewed_by": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Name or initials of the person who authored these notes."
+    },
+    "reviewed_at": {
+      "type": "string",
+      "description": "ISO-8601 datetime with timezone, e.g. 2026-11-07T12:00:00+09:00."
+    },
+    "note": {
+      "type": "string",
+      "description": "Free-text comment about this slide's annotations."
+    },
+    "actions": {
+      "type": "array",
+      "minItems": 0,
+      "description": "List of annotation actions a strong student would apply to this slide.",
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    }
+  },
+  "$defs": {
+    "word_target": {
+      "type": "object",
+      "required": ["words"],
+      "additionalProperties": false,
+      "properties": {
+        "words": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "description": "Word IDs from extraction.json that this action targets."
+        }
+      }
+    },
+    "block_target": {
+      "type": "object",
+      "required": ["figure"],
+      "additionalProperties": false,
+      "properties": {
+        "figure": {
+          "type": "string",
+          "description": "Block ID of a figure from extraction.json."
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": ["type", "importance", "quote", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["highlight", "underline", "circle", "box", "connect", "note", "sticky", "insert", "bracket"],
+          "description": "Visual mark type."
+        },
+        "target": {
+          "oneOf": [{"$ref": "#/$defs/word_target"}, {"$ref": "#/$defs/block_target"}],
+          "description": "What the mark or note points to."
+        },
+        "source": {
+          "$ref": "#/$defs/word_target",
+          "description": "Source target for 'connect' actions."
+        },
+        "to": {
+          "$ref": "#/$defs/word_target",
+          "description": "Destination target for 'connect' actions."
+        },
+        "after": {
+          "type": "string",
+          "description": "Word ID after which to insert text ('insert' actions)."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "key_term", "definition", "explanation", "example", "emphasis",
+            "warning", "exam_hint", "question", "answer", "derivation_step",
+            "correction", "connection", "off_slide_addition"
+          ],
+          "description": "Semantic role of this annotation."
+        },
+        "style": {
+          "type": "string",
+          "enum": ["single", "double", "wavy"],
+          "description": "Underline style (for 'underline' actions)."
+        },
+        "hint": {
+          "type": "string",
+          "enum": ["near", "above", "below", "left", "right", "margin"],
+          "description": "Preferred placement for 'note', 'sticky', 'insert' actions."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Short label for 'connect' actions."
+        },
+        "importance": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "1 = incidental, 5 = exam-critical."
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Note text for 'note', 'sticky', 'insert', 'connect' actions. Condensed student style."
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Verbatim or near-verbatim excerpt from the transcript that supports this action."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why this annotation belongs here — what the professor added beyond the slide."
+        }
+      }
+    }
+  }
+}
