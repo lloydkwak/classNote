@@ -63,7 +63,46 @@ Goal: annotated slides a strong student would be proud of. Speed is out of scope
 
 ## 4. Phase 1: alignment that is right
 
-Techniques, in order of expected gain:
+### Results (completed 2026-11-07)
+
+All systems evaluated on 20 MaViLS lectures (10 train / 10 test, deterministic split).
+Metric: sentence-level exact accuracy = correctly-assigned sentences / sentences-with-valid-gold.
+
+| System | Config | Train | Test | Δ vs baseline |
+|--------|--------|------:|-----:|:---:|
+| v1 + e5 (baseline) | 30 s windows, exp=— | 51.7% | 62.9% | — |
+| v2 + e5 | sentence windows, exp=3.0, bm25=0 | 48.1% | 53.5% | −9.4 |
+| v2 + e5 (tuned) | exp=1.0, bm25=0.1 | 54.7% | 60.9% | −2.0 |
+| v2 + bge-m3 | exp=3.0, bm25=0 | 49.3% | 58.3% | −4.6 |
+| v2 + bge-m3 (tuned) | exp=1.0, bm25=0.2 | 56.6% | 65.0% | **+2.1** |
+| v2 + qwen3 | exp=3.0, bm25=0 | 55.5% | 62.3% | −0.6 |
+| v2 + qwen3 (tuned) | exp=1.0, bm25=0.2 | 56.9% | **66.8%** | **+3.9** |
+| v2 + qwen3 + cues (4a) | exp=1.0, bm25=0 | — | 64.9% | +2.0 |
+
+Best config: `v2 + qwen3, sharpening_exp=1.0, bm25_weight=0.2` → **66.8% test** (+3.9 pts over v1 baseline).
+SNU target (swpp-2025 team 01): 81.7%. Gap: **14.9 pts**.
+
+Gold-label gate (job `05a433631737`, 1 verified label):
+
+| System | Exact | ±1 | Verdict |
+|--------|------:|----:|---------|
+| v1 + e5 | 100% | 100% | — |
+| v2 + e5 | 80.6% | 80.6% | gate holds |
+| v2 + bge-m3 | 80.6% | 80.6% | gate holds |
+
+`ALIGNMENT_VERSION` default stays `v1` until v2 beats v1 on verified gold.
+
+### Implementation shipped
+
+- `app/pipeline/sentence_align.py` — sentence-window builder, max-normalize → sharpen → DP, BM25 mix,
+  slide-turn cue boosts (4a), logistics/announcement off-topic detection (4b)
+- `app/pipeline/llm_arbitration.py` — low-confidence stretch detection, LLM arbitration with thumbnails (4c)
+- `app/pipeline/page_align.py` — `BgeM3Embedder`, `Qwen3Embedder`, `get_embedder()` model routing
+- `app/pipeline/run.py` / `app/pipeline/live.py` — `ALIGNMENT_VERSION=v1|v2` switch (default v1)
+- `scripts/benchmark_mavils.py` — grid-search tuning, train/test reporting, `--arbitrate` flag
+- `scripts/benchmark_alignment.py --job` — per-system comparison on verified gold
+
+### Techniques, in order of expected gain:
 
 1. **Sentence-level DP with calibrated scores.** Align sentences (from word timestamps), not 30 s windows. Per sentence:
    normalize scores so the best is 1, apply exponential sharpening, boost confident sentences, then DP with a forward
